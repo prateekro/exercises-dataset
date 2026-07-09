@@ -432,7 +432,7 @@
       <div class="ov-tag">Smart-Glasses Exercise Coach</div>
       <div class="ov-desc" id="ovDesc">
         Look at any gym equipment and Vizion tells you <b>what you can do</b> with it and
-        <b>how it helps</b> — powered by 1,324 exercises from the open Exercises Dataset.
+        <b>how it helps</b> — powered by <span id="ovCount">1,324</span> exercises from the open Exercises Dataset.
       </div>
       <button class="ov-btn" id="startBtn">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7Z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
@@ -558,7 +558,8 @@
         window.speechSynthesis.cancel();
         const u = new SpeechSynthesisUtterance(text);
         u.lang = VOICE_LANG[store.lang] || 'en-US';
-        u.rate = 1.02; u.pitch = 1;
+        u.rate = 1.05; // slightly brisk so hands-free coaching feels natural, not sluggish
+        u.pitch = 1;
         window.speechSynthesis.speak(u);
       } catch (_) {}
     }
@@ -578,6 +579,9 @@
       EQUIP_LIST = Object.keys(EQUIP_INDEX)
         .map((e) => ({ equipment: e, count: EQUIP_INDEX[e].length }))
         .sort((a, b) => b.count - a.count);
+      // Reflect the real dataset size in the intro copy.
+      const countEl = document.getElementById('ovCount');
+      if (countEl) countEl.textContent = EXERCISES.length.toLocaleString();
     }
 
     /* Rank exercises: prefer ones with media + spread across body parts. */
@@ -638,6 +642,8 @@
         await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
         await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1/dist/mobilenet.min.js');
         if (!window.mobilenet || !window.mobilenet.load) throw new Error('mobilenet unavailable');
+        // version 2 + alpha 0.5 = the small/fast MobileNet variant: lower accuracy
+        // than alpha 1.0 but much quicker inference, suited to a wearable/mobile HUD.
         mobilenet = await window.mobilenet.load({ version: 2, alpha: 0.5 });
         aiDot.classList.remove('warn'); aiDot.classList.add('on');
         return true;
@@ -667,12 +673,16 @@
       ctx.drawImage(cam, (vw - s) / 2, (vh - s) / 2, s, s, 0, 0, size, size);
       let preds;
       try { preds = await mobilenet.classify(canvas, 5); } catch (_) { return null; }
+      // Pick the highest-probability prediction that maps to known equipment,
+      // rather than the first match, for more accurate detection.
+      let best = null;
       for (const p of preds) {
         const equip = mapLabel(p.className);
-        if (equip && p.probability >= store.confidence) {
-          return { equip, confidence: p.probability, raw: p.className };
+        if (equip && p.probability >= store.confidence && (!best || p.probability > best.confidence)) {
+          best = { equip, confidence: p.probability, raw: p.className };
         }
       }
+      if (best) return best;
       return { equip: null, confidence: preds[0] ? preds[0].probability : 0, raw: preds[0] && preds[0].className };
     }
 
@@ -746,7 +756,7 @@
         card.className = 'ex-card';
         const media = ex.gif_url || ex.image || '';
         card.innerHTML = `
-          <img class="ex-thumb" loading="lazy" alt="" src="${media}"
+          <img class="ex-thumb" loading="lazy" alt="${escapeHtml(ex.name)} demonstration" src="${media}"
                onerror="this.style.visibility='hidden'">
           <div class="ex-info">
             <div class="ex-name">${escapeHtml(ex.name)}</div>
@@ -765,7 +775,10 @@
       if (Array.isArray(ex.instruction_steps) && ex.instruction_steps.length) return ex.instruction_steps;
       const txt = ex.instructions && (ex.instructions[store.lang] || ex.instructions.en);
       if (!txt) return [];
-      return txt.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
+      // Split into sentences without lookbehind (broader runtime support),
+      // keeping the terminating punctuation on each sentence.
+      const parts = txt.match(/[^.!?]+[.!?]+/g) || [txt];
+      return parts.map((s) => s.trim()).filter(Boolean);
     }
 
     function openDetail(ex) {
@@ -775,7 +788,7 @@
       const body = $('#detailBody');
       body.innerHTML = `
         <div class="detail-hero">
-          <img alt="" src="${media}" onerror="this.style.visibility='hidden'">
+          <img alt="${escapeHtml(ex.name)} exercise demonstration" src="${media}" onerror="this.style.visibility='hidden'">
           <div>
             <div class="detail-name">${escapeHtml(ex.name)}</div>
             <div class="detail-sub">${escapeHtml(cap(ex.equipment))} · ${escapeHtml(cap(ex.body_part))}</div>
@@ -902,6 +915,9 @@
     /* ══════════════════════════════════════════════════
        11. Continuous (auto) scan
        ══════════════════════════════════════════════════ */
+    /* Continuous-scan cadence: long enough to keep model inference and battery
+       use reasonable on a wearable, short enough to feel responsive. */
+    const AUTO_SCAN_INTERVAL_MS = 2600;
     function setupAutoScan() {
       clearInterval(autoTimer);
       if (!store.autoScan || !mobilenet) return;
@@ -912,7 +928,7 @@
         if (r && r.equip && r.equip !== currentEquip) {
           selectEquipment(r.equip, r.confidence);
         }
-      }, 2600);
+      }, AUTO_SCAN_INTERVAL_MS);
     }
 
     /* ══════════════════════════════════════════════════
