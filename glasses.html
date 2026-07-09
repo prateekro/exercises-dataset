@@ -776,8 +776,13 @@
       const txt = ex.instructions && (ex.instructions[store.lang] || ex.instructions.en);
       if (!txt) return [];
       // Split into sentences without lookbehind (broader runtime support),
-      // keeping the terminating punctuation on each sentence.
-      const parts = txt.match(/[^.!?]+[.!?]+/g) || [txt];
+      // keeping the terminating punctuation on each sentence and capturing any
+      // trailing text that lacks final punctuation.
+      const sentences = txt.match(/[^.!?]+[.!?]+/g) || [];
+      const consumed = sentences.join('');
+      const tail = txt.slice(consumed.length).trim();
+      if (tail) sentences.push(tail);
+      const parts = sentences.length ? sentences : [txt];
       return parts.map((s) => s.trim()).filter(Boolean);
     }
 
