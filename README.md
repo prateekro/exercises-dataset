@@ -78,9 +78,11 @@ Each exercise entry contains:
 
 ## 🖥️ Interactive Browser & Developer Setup
 
-This repository includes two ready-to-use HTML tools — no server required, just open in a browser.
+This repository includes three ready-to-use, fully client-side HTML tools.
 
 > **Note:** the browser displays each exercise's 180×180 thumbnail and animation GIF alongside its metadata and instructions.
+>
+> `index.html` and `setup.html` need no server — just open them in a browser. `glasses.html` uses your camera, so it must be served over **HTTPS or `localhost`** (a secure context is required for camera access), e.g. `python3 -m http.server` then open `http://localhost:8000/glasses.html`.
 
 ### `index.html` — Exercise Browser
 
@@ -98,6 +100,20 @@ A step-by-step guide for integrating the dataset into your own application:
 2. **API Integration** — Copy-paste client code in **JavaScript, Python, C#, Java, PHP, Go, and cURL** showing how to call your backend API. Enter your base URL and all examples update live.
 3. **Ask Your LLM** — A structured prompt (choose your framework + database) that you can paste into ChatGPT, Claude, or Gemini to generate a complete, production-ready REST API in one shot. Supports Express.js, FastAPI, ASP.NET Core, Spring Boot, Laravel, and Gin.
 
+### `glasses.html` — Smart-Glasses Exercise Coach (camera app)
+
+A production-style, single-file **heads-up-display (HUD) app** — designed for Meta-style smart glasses or any phone/webcam — that turns the camera into an exercise coach:
+
+- **Live camera feed** with a glasses-style HUD overlay (reticle, corner brackets, status bar).
+- **On-device equipment recognition** via TensorFlow.js **MobileNet** (loaded from CDN) — point at a dumbbell, barbell, pull-up bar, etc., tap **Scan**, and it identifies the equipment. Nothing you scan leaves the device.
+- **Assisted picker** — if the camera is unsure (or offline), choose from all 28 equipment types manually.
+- **Exercise suggestions** filtered by the detected equipment, with a body-part filter and a plain-language **"how it helps"** benefit for every exercise (derived from its target muscle and body part).
+- **Exercise detail** — animation GIF, muscles worked, and step-by-step instructions in any of the 6 languages.
+- **Hands-free voice narration** (Web Speech API) so a coach can read out suggestions and instructions — ideal for a glasses form factor.
+- **Continuous scan**, language, voice, and sensitivity **settings** persisted in `localStorage`; graceful degradation when the camera or model is unavailable.
+
+> Runs entirely in the browser against `data/exercises.json` — no backend. Because it needs camera access, serve it over `localhost`/HTTPS rather than opening the file directly.
+
 ---
 
 ## 📂 File Structure
@@ -110,6 +126,7 @@ exercises-dataset/
 ├── videos/                  # 1,324 × 180×180 animation GIFs  (© Gym visual)
 ├── index.html               # Interactive exercise browser (client-side, no server needed)
 ├── setup.html               # Developer setup guide (DB import + API integration)
+├── glasses.html             # Smart-glasses HUD coach — camera scans equipment → suggests exercises
 ├── NOTICE.md                # Media attribution & license terms
 └── README.md
 ```
@@ -120,6 +137,7 @@ exercises-dataset/
 - **`images/`, `videos/`** — 180×180 thumbnails and animation GIFs (© [Gym visual](https://gymvisual.com/), used with permission).
 - **`index.html`** — Standalone exercise browser. Open directly in any modern browser.
 - **`setup.html`** — Developer guide for DB setup, API integration, and LLM-assisted backend generation.
+- **`glasses.html`** — Standalone smart-glasses HUD app: uses the device camera to recognize gym equipment (TensorFlow.js MobileNet) and suggests exercises with benefits, GIFs, and multilingual instructions. Needs a secure context (localhost/HTTPS) for camera access.
 - **`LICENSE`, `NOTICE.md`** — MIT (code/data) + the Gym visual media terms.
 
 ---
