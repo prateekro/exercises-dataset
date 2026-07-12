@@ -464,10 +464,11 @@
     const LANGS = { en:'English', es:'Español', it:'Italiano', tr:'Türkçe', ru:'Русский', zh:'中文' };
     const MIN_CONFIDENCE = .05;
     const MAX_CONFIDENCE = .6;
+    const DEFAULT_CONFIDENCE = .18;
     const INTER_FRAME_DELAY_MS = 80;
     const SHEET_FOCUSABLE = 'button:not([disabled]), select, input, [tabindex]:not([tabindex="-1"])';
     const store = {
-      lang: 'en', voice: true, autoScan: true, confidence: 0.18,
+      lang: 'en', voice: true, autoScan: true, confidence: DEFAULT_CONFIDENCE,
     };
     try {
       const saved = JSON.parse(localStorage.getItem('vizion') || '{}');
@@ -727,7 +728,7 @@
         const s = document.createElement('script');
         const timeout = setTimeout(() => {
           s.remove();
-          reject(new Error('Timed out loading AI model'));
+          reject(new Error(`Timed out loading AI model from ${src}`));
         }, 20000);
         s.src = src; s.async = true; s.crossOrigin = 'anonymous'; s.referrerPolicy = 'no-referrer';
         s.onload = () => { clearTimeout(timeout); resolve(); };
@@ -1094,8 +1095,9 @@
           if (result && result.equip) {
             if (result.equip === autoCandidate) {
               autoCandidateHits++;
-              autoCandidateConfidence =
-                ((autoCandidateConfidence * (autoCandidateHits - 1)) + result.confidence) / autoCandidateHits;
+              autoCandidateConfidence = rollingAverage(
+                autoCandidateConfidence, result.confidence, autoCandidateHits
+              );
             } else {
               autoCandidate = result.equip;
               autoCandidateHits = 1;
@@ -1126,11 +1128,13 @@
     }
     function safeMediaUrl(path) {
       const value = String(path || '');
-      if (value.includes('..')) return '';
-      return /^(images|videos)\/[A-Za-z0-9._-]+$/.test(value) ? value : '';
+      return /^(images|videos)\/[A-Za-z0-9_-]+\.(gif|jpe?g|png|webp|mp4|webm)$/i.test(value) ? value : '';
     }
     function hideBrokenImage(image) {
       if (image) image.addEventListener('error', () => { image.style.visibility = 'hidden'; }, { once: true });
+    }
+    function rollingAverage(currentAverage, newValue, count) {
+      return ((currentAverage * (count - 1)) + newValue) / count;
     }
     function tick() {
       const d = new Date();
