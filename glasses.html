@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1" />
+  <meta name="theme-color" content="#04060a" />
+  <title>Vizion — Smart-Glasses Exercise Coach</title>
+  <style>
+    /* ── Reset ─────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    button { font: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+    img { display: block; max-width: 100%; }
+    ul { list-style: none; }
+
+    /* ── Design tokens (glasses HUD aesthetic) ──────── */
+    :root {
+      --hud:            #38f5c9;     /* primary phosphor accent */
+      --hud-dim:        rgba(56, 245, 201, 0.35);
+      --hud-faint:      rgba(56, 245, 201, 0.12);
+      --warn:           #ffb020;
+      --danger:         #ff5470;
+      --ink:            #eafefb;
+      --ink-soft:       #9fc7c0;
+      --panel:          rgba(6, 14, 18, 0.82);
+      --panel-solid:    #06121a;
+      --line:           rgba(56, 245, 201, 0.25);
+      --radius:         14px;
+      --safe-t:         env(safe-area-inset-top, 0px);
+      --safe-b:         env(safe-area-inset-bottom, 0px);
+    }
+
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      background: #04060a;
+      color: var(--ink);
+      font-family: 'SF Mono', ui-monospace, 'Roboto Mono', 'Segoe UI', monospace;
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+
+    /* ── Stage: live camera + overlays ──────────────── */
+    #stage { position: fixed; inset: 0; overflow: hidden; background: #04060a; }
+    #cam {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      object-fit: cover; background: #04060a;
+      transition: filter .4s ease;
+    }
+    #cam.idle { filter: grayscale(0.4) brightness(0.75); }
+    #scanCanvas { display: none; }
+
+    /* subtle scan-line / vignette on top of the feed */
+    .fx {
+      position: absolute; inset: 0; pointer-events: none;
+      background:
+        radial-gradient(120% 120% at 50% 50%, transparent 55%, rgba(0,0,0,.55) 100%),
+        repeating-linear-gradient(0deg, rgba(56,245,201,.035) 0 1px, transparent 1px 3px);
+      mix-blend-mode: screen;
+    }
+
+    /* ── HUD reticle / corner brackets ──────────────── */
+    .reticle { position: absolute; inset: 0; pointer-events: none; }
+    .bracket {
+      position: absolute; width: 46px; height: 46px;
+      border: 2px solid var(--hud); opacity: .7;
+    }
+    .bracket.tl { top: calc(16px + var(--safe-t)); left: 16px; border-right: 0; border-bottom: 0; }
+    .bracket.tr { top: calc(16px + var(--safe-t)); right: 16px; border-left: 0; border-bottom: 0; }
+    .bracket.bl { bottom: calc(96px + var(--safe-b)); left: 16px; border-right: 0; border-top: 0; }
+    .bracket.br { bottom: calc(96px + var(--safe-b)); right: 16px; border-left: 0; border-top: 0; }
+
+    .focus {
+      position: absolute; top: 50%; left: 50%; width: 180px; height: 180px;
+      transform: translate(-50%, -50%); pointer-events: none;
+      border: 1px solid var(--hud-dim); border-radius: 8px;
+    }
+    .focus::before, .focus::after {
+      content: ""; position: absolute; background: var(--hud);
+    }
+    .focus::before { top: 50%; left: 50%; width: 14px; height: 1px; transform: translate(-50%,-50%); }
+    .focus::after  { top: 50%; left: 50%; width: 1px; height: 14px; transform: translate(-50%,-50%); }
+    .scanline {
+      position: absolute; left: 0; right: 0; height: 2px;
+      background: linear-gradient(90deg, transparent, var(--hud), transparent);
+      box-shadow: 0 0 12px var(--hud);
+      opacity: 0; top: 0;
+    }
+    #stage.scanning .scanline { animation: sweep 1.6s ease-in-out infinite; opacity: 1; }
+    @keyframes sweep {
+      0%   { top: 22%; opacity: 0; }
+      15%  { opacity: 1; }
+      85%  { opacity: 1; }
+      100% { top: 78%; opacity: 0; }
+    }
+    #stage.scanning .focus { border-color: var(--hud); animation: pulse 1.6s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{ box-shadow: 0 0 0 0 var(--hud-faint);} 50%{ box-shadow: 0 0 0 10px transparent;} }
+
+    /* ── Top status bar ─────────────────────────────── */
+    .topbar {
+      position: absolute; top: 0; left: 0; right: 0;
+      padding: calc(10px + var(--safe-t)) 16px 10px;
+      display: flex; align-items: center; gap: 10px;
+      font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+      background: linear-gradient(180deg, rgba(4,6,10,.85), transparent);
+      pointer-events: none;
+    }
+    .brand { font-weight: 800; color: var(--hud); letter-spacing: .12em; }
+    .brand b { color: var(--ink); font-weight: 800; }
+    .top-spacer { flex: 1; }
+    .stat { display: flex; align-items: center; gap: 5px; color: var(--ink-soft); }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-soft); }
+    .dot.on { background: var(--hud); box-shadow: 0 0 8px var(--hud); }
+    .dot.warn { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+    .dot.err  { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+
+    /* ── Detection banner ───────────────────────────── */
+    .detect {
+      position: absolute; left: 50%; top: calc(64px + var(--safe-t));
+      transform: translateX(-50%);
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 999px; padding: 8px 16px;
+      display: flex; align-items: center; gap: 10px;
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      max-width: calc(100% - 32px); white-space: nowrap;
+      box-shadow: 0 0 24px rgba(0,0,0,.4);
+    }
+    .detect .eq { color: var(--hud); font-weight: 800; text-transform: capitalize; letter-spacing: .04em; }
+    .detect .conf { color: var(--ink-soft); font-size: 11px; }
+    .detect .label { font-size: 11px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .1em; }
+    .detect.hidden { display: none; }
+
+    /* ── Toast / hint ───────────────────────────────── */
+    .hint {
+      position: absolute; left: 50%; bottom: calc(108px + var(--safe-b));
+      transform: translateX(-50%);
+      font-size: 12px; color: var(--ink-soft); text-align: center;
+      background: var(--panel); border: 1px solid var(--line);
+      padding: 8px 14px; border-radius: 10px; max-width: calc(100% - 40px);
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+    .hint.hidden { display: none; }
+    .hint b { color: var(--hud); }
+
+    /* ── Bottom action dock ─────────────────────────── */
+    .dock {
+      position: absolute; left: 0; right: 0; bottom: 0;
+      padding: 12px 16px calc(14px + var(--safe-b));
+      display: flex; align-items: center; justify-content: center; gap: 14px;
+      background: linear-gradient(0deg, rgba(4,6,10,.9), transparent);
+    }
+    .dock-btn {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      color: var(--ink-soft); font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+      min-width: 56px; transition: color .15s ease;
+    }
+    .dock-btn:active { color: var(--hud); }
+    .dock-btn svg { width: 24px; height: 24px; }
+    .scan-btn {
+      width: 74px; height: 74px; border-radius: 50%;
+      border: 2px solid var(--hud);
+      background: radial-gradient(circle at 50% 40%, rgba(56,245,201,.28), rgba(6,18,22,.9));
+      color: var(--hud); display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 2px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700;
+      box-shadow: 0 0 24px rgba(56,245,201,.35);
+    }
+    .scan-btn svg { width: 26px; height: 26px; }
+    .scan-btn:active { transform: scale(.95); }
+    .scan-btn[disabled] { opacity: .4; border-color: var(--ink-soft); color: var(--ink-soft); box-shadow: none; }
+    .dock-btn.active { color: var(--hud); }
+
+    /* ── Sliding panels (results / picker / settings) ─ */
+    .sheet {
+      position: absolute; left: 0; right: 0; bottom: 0;
+      max-height: 82vh; display: flex; flex-direction: column;
+      background: var(--panel); border-top: 1px solid var(--line);
+      border-radius: 20px 20px 0 0;
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      transform: translateY(102%); transition: transform .32s cubic-bezier(.22,.9,.3,1);
+      box-shadow: 0 -12px 40px rgba(0,0,0,.5);
+      z-index: 20;
+    }
+    .sheet.open { transform: translateY(0); }
+    .sheet-grip { width: 40px; height: 4px; border-radius: 2px; background: var(--hud-dim); margin: 10px auto 4px; }
+    .sheet-head {
+      display: flex; align-items: center; gap: 10px;
+      padding: 6px 16px 10px; border-bottom: 1px solid var(--line);
+    }
+    .sheet-title { font-size: 13px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--hud); }
+    .sheet-sub { font-size: 11px; color: var(--ink-soft); }
+    .sheet-close {
+      margin-left: auto; width: 30px; height: 30px; border-radius: 8px;
+      border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--ink-soft);
+    }
+    .sheet-body { overflow-y: auto; padding: 12px 14px calc(20px + var(--safe-b)); -webkit-overflow-scrolling: touch; }
+
+    /* ── Filter chips ───────────────────────────────── */
+    .chips { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 12px; scrollbar-width: none; }
+    .chips::-webkit-scrollbar { display: none; }
+    .chip {
+      flex: 0 0 auto; padding: 6px 12px; border-radius: 999px;
+      border: 1px solid var(--line); color: var(--ink-soft);
+      font-size: 12px; text-transform: capitalize; white-space: nowrap; letter-spacing: .02em;
+    }
+    .chip.on { background: var(--hud); color: #04120e; border-color: var(--hud); font-weight: 700; }
+
+    /* ── Exercise cards ─────────────────────────────── */
+    .ex-list { display: grid; gap: 10px; }
+    .ex-card {
+      display: grid; grid-template-columns: 78px 1fr; gap: 12px; align-items: center;
+      background: rgba(56,245,201,.05); border: 1px solid var(--line);
+      border-radius: var(--radius); padding: 10px; text-align: left; width: 100%;
+    }
+    .ex-card:active { border-color: var(--hud); }
+    .ex-thumb {
+      width: 78px; height: 78px; border-radius: 10px; object-fit: cover;
+      background: #06121a; border: 1px solid var(--line);
+    }
+    .ex-info { min-width: 0; }
+    .ex-name { font-size: 14px; font-weight: 700; color: var(--ink); text-transform: capitalize; line-height: 1.3; }
+    .ex-meta { font-size: 11px; color: var(--ink-soft); margin-top: 3px; text-transform: capitalize; }
+    .ex-help { font-size: 11px; color: var(--hud); margin-top: 6px; line-height: 1.4; }
+    .ex-tag {
+      display: inline-block; margin-top: 6px; margin-right: 5px;
+      font-size: 10px; letter-spacing: .05em; text-transform: uppercase;
+      color: var(--ink-soft); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px;
+    }
+
+    /* ── Equipment picker grid ──────────────────────── */
+    .eq-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .eq-item {
+      display: flex; align-items: center; gap: 10px;
+      border: 1px solid var(--line); border-radius: 12px; padding: 12px 12px;
+      text-align: left; color: var(--ink);
+    }
+    .eq-item:active, .eq-item.on { border-color: var(--hud); background: var(--hud-faint); }
+    .eq-item .n { font-size: 13px; font-weight: 700; text-transform: capitalize; }
+    .eq-item .c { font-size: 11px; color: var(--ink-soft); }
+    .eq-emoji { font-size: 22px; line-height: 1; filter: drop-shadow(0 0 6px rgba(56,245,201,.4)); }
+
+    /* ── Settings rows ──────────────────────────────── */
+    .set-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 4px; border-bottom: 1px solid var(--line);
+    }
+    .set-row .sr-main { flex: 1; min-width: 0; }
+    .set-row .sr-name { font-size: 13px; font-weight: 700; }
+    .set-row .sr-desc { font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
+    select, .toggle {
+      background: var(--panel-solid); color: var(--ink);
+      border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 12px;
+    }
+    .toggle { width: 52px; height: 30px; border-radius: 999px; position: relative; flex: 0 0 auto; padding: 0; }
+    .toggle::after {
+      content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%;
+      background: var(--ink-soft); transition: all .18s ease;
+    }
+    .toggle.on { border-color: var(--hud); background: var(--hud-faint); }
+    .toggle.on::after { left: 27px; background: var(--hud); box-shadow: 0 0 8px var(--hud); }
+    input[type=range] { width: 100%; accent-color: var(--hud); }
+
+    /* ── Detail sheet ───────────────────────────────── */
+    #detailSheet .sheet-body { padding-top: 0; }
+    .detail-hero {
+      display: grid; grid-template-columns: 120px 1fr; gap: 14px; align-items: center;
+      padding: 14px 0 12px;
+    }
+    .detail-hero img { width: 120px; height: 120px; border-radius: 12px; object-fit: cover; border: 1px solid var(--line); background:#06121a; }
+    .detail-name { font-size: 18px; font-weight: 800; text-transform: capitalize; line-height: 1.25; }
+    .detail-sub { font-size: 12px; color: var(--ink-soft); margin-top: 6px; text-transform: capitalize; }
+    .detail-block { margin-top: 14px; }
+    .detail-h {
+      font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--hud);
+      margin-bottom: 6px; display: flex; align-items: center; gap: 8px;
+    }
+    .detail-p { font-size: 13px; line-height: 1.6; color: var(--ink); }
+    .muscle-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .steps { display: grid; gap: 8px; }
+    .step { display: grid; grid-template-columns: 22px 1fr; gap: 10px; font-size: 13px; line-height: 1.5; }
+    .step .num { color: var(--hud); font-weight: 700; }
+    .detail-actions { display: flex; gap: 10px; margin-top: 16px; }
+    .btn {
+      flex: 1; padding: 12px; border-radius: 12px; border: 1px solid var(--hud);
+      color: var(--hud); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .btn.filled { background: var(--hud); color: #04120e; }
+    .btn:active { transform: scale(.98); }
+
+    /* ── Boot / permission overlay ──────────────────── */
+    .overlay {
+      position: absolute; inset: 0; z-index: 40; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; text-align: center; padding: 28px;
+      background: radial-gradient(120% 120% at 50% 30%, #08202a, #04060a);
+    }
+    .overlay.hidden { display: none; }
+    .ov-logo { font-size: 26px; font-weight: 800; letter-spacing: .16em; color: var(--hud); text-shadow: 0 0 24px var(--hud-dim); }
+    .ov-logo b { color: var(--ink); }
+    .ov-tag { font-size: 12px; color: var(--ink-soft); margin-top: 8px; letter-spacing: .1em; text-transform: uppercase; }
+    .ov-desc { font-size: 13px; color: var(--ink); margin-top: 22px; max-width: 340px; line-height: 1.6; }
+    .ov-btn {
+      margin-top: 26px; padding: 14px 28px; border-radius: 999px;
+      border: 1px solid var(--hud); background: var(--hud); color: #04120e;
+      font-weight: 800; letter-spacing: .06em; text-transform: uppercase; font-size: 13px;
+      display: inline-flex; align-items: center; gap: 10px;
+    }
+    .ov-btn:active { transform: scale(.97); }
+    .ov-note { font-size: 11px; color: var(--ink-soft); margin-top: 16px; max-width: 320px; line-height: 1.5; }
+    .ov-err { color: var(--danger); }
+    .spinner {
+      width: 34px; height: 34px; border-radius: 50%;
+      border: 3px solid var(--hud-faint); border-top-color: var(--hud);
+      animation: spin .8s linear infinite; margin-top: 24px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .empty { text-align: center; color: var(--ink-soft); font-size: 13px; padding: 30px 10px; line-height: 1.6; }
+
+    @media (min-width: 720px) {
+      .eq-grid { grid-template-columns: repeat(3, 1fr); }
+      .sheet { left: 50%; right: auto; width: 560px; transform: translate(-50%, 102%); }
+      .sheet.open { transform: translate(-50%, 0); }
+    }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <video id="cam" class="idle" playsinline autoplay muted></video>
+    <canvas id="scanCanvas"></canvas>
+    <div class="fx"></div>
+
+    <div class="reticle">
+      <span class="bracket tl"></span><span class="bracket tr"></span>
+      <span class="bracket bl"></span><span class="bracket br"></span>
+      <div class="focus"></div>
+      <div class="scanline"></div>
+    </div>
+
+    <!-- Top status bar -->
+    <div class="topbar">
+      <span class="brand">VIZ<b>ION</b></span>
+      <span class="top-spacer"></span>
+      <span class="stat"><span id="camDot" class="dot"></span>CAM</span>
+      <span class="stat"><span id="aiDot" class="dot"></span>AI</span>
+      <span class="stat" id="clock">--:--</span>
+    </div>
+
+    <!-- Detection banner -->
+    <div class="detect hidden" id="detectBanner">
+      <span class="label">Detected</span>
+      <span class="eq" id="detectEq">—</span>
+      <span class="conf" id="detectConf"></span>
+    </div>
+
+    <!-- Contextual hint -->
+    <div class="hint" id="hint">Point at your <b>equipment</b> and tap <b>Scan</b>.</div>
+
+    <!-- Bottom dock -->
+    <div class="dock" id="dock">
+      <button class="dock-btn" id="pickBtn" aria-label="Choose equipment">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6.5 6.5h11M6.5 17.5h11M4 9v6M20 9v6M8 8v8M16 8v8"/></svg>
+        Equipment
+      </button>
+      <button class="scan-btn" id="scanBtn" aria-label="Scan equipment">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8V5a1 1 0 0 1 1-1h3M20 8V5a1 1 0 0 0-1-1h-3M4 16v3a1 1 0 0 0 1 1h3M20 16v3a1 1 0 0 1-1 1h-3M3 12h18"/></svg>
+        Scan
+      </button>
+      <button class="dock-btn" id="settingsBtn" aria-label="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2l-.3-2.6H9.8l-.3 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12a7 7 0 0 0 .1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2l.3 2.6h4.4l.3-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6A7 7 0 0 0 19 12Z"/></svg>
+        Settings
+      </button>
+    </div>
+
+    <!-- Results sheet -->
+    <section class="sheet" id="resultsSheet" aria-label="Suggested exercises">
+      <div class="sheet-grip"></div>
+      <div class="sheet-head">
+        <div>
+          <div class="sheet-title" id="resultsTitle">Suggestions</div>
+          <div class="sheet-sub" id="resultsSub">—</div>
+        </div>
+        <button class="dock-btn" id="speakAllBtn" style="min-width:auto;margin-left:auto" aria-label="Narrate">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 9v6h4l5 4V5L8 9H4Z"/><path d="M16 8a5 5 0 0 1 0 8"/></svg>
+          Narrate
+        </button>
+        <button class="sheet-close" data-close="resultsSheet" aria-label="Close">✕</button>
+      </div>
+      <div class="sheet-body">
+        <div class="chips" id="bodyChips"></div>
+        <div class="ex-list" id="exList"></div>
+      </div>
+    </section>
+
+    <!-- Equipment picker sheet -->
+    <section class="sheet" id="pickerSheet" aria-label="Choose equipment">
+      <div class="sheet-grip"></div>
+      <div class="sheet-head">
+        <div>
+          <div class="sheet-title">Choose Equipment</div>
+          <div class="sheet-sub">Camera unsure? Pick manually.</div>
+        </div>
+        <button class="sheet-close" data-close="pickerSheet" aria-label="Close">✕</button>
+      </div>
+      <div class="sheet-body"><div class="eq-grid" id="eqGrid"></div></div>
+    </section>
+
+    <!-- Settings sheet -->
+    <section class="sheet" id="settingsSheet" aria-label="Settings">
+      <div class="sheet-grip"></div>
+      <div class="sheet-head">
+        <div class="sheet-title">Settings</div>
+        <button class="sheet-close" data-close="settingsSheet" aria-label="Close">✕</button>
+      </div>
+      <div class="sheet-body" id="settingsBody"></div>
+    </section>
+
+    <!-- Exercise detail sheet -->
+    <section class="sheet" id="detailSheet" aria-label="Exercise detail">
+      <div class="sheet-grip"></div>
+      <div class="sheet-head">
+        <div class="sheet-title">Exercise</div>
+        <button class="dock-btn" id="detailSpeakBtn" style="min-width:auto;margin-left:auto" aria-label="Narrate exercise">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 9v6h4l5 4V5L8 9H4Z"/><path d="M16 8a5 5 0 0 1 0 8"/></svg>
+          Narrate
+        </button>
+        <button class="sheet-close" data-close="detailSheet" aria-label="Close">✕</button>
+      </div>
+      <div class="sheet-body" id="detailBody"></div>
+    </section>
+
+    <!-- Boot / permission overlay -->
+    <div class="overlay" id="overlay">
+      <div class="ov-logo">VIZ<b>ION</b></div>
+      <div class="ov-tag">Smart-Glasses Exercise Coach</div>
+      <div class="ov-desc" id="ovDesc">
+        Look at any gym equipment and Vizion tells you <b>what you can do</b> with it and
+        <b>how it helps</b> — powered by <span id="ovCount">1,324</span> exercises from the open Exercises Dataset.
+      </div>
+      <button class="ov-btn" id="startBtn">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7Z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+        Activate Display
+      </button>
+      <div class="ov-note" id="ovNote">
+        Requires camera access. Runs fully on-device — nothing you scan leaves your glasses.
+      </div>
+    </div>
+  </div>
+
+  <script>
+  "use strict";
+  (function () {
+    /* ══════════════════════════════════════════════════
+       0. Config & state
+       ══════════════════════════════════════════════════ */
+    const LANGS = { en:'English', es:'Español', it:'Italiano', tr:'Türkçe', ru:'Русский', zh:'中文' };
+    const store = {
+      lang: 'en', voice: true, autoScan: true, confidence: 0.18,
+    };
+    try { Object.assign(store, JSON.parse(localStorage.getItem('vizion') || '{}')); } catch (_) {}
+    const saveStore = () => { try { localStorage.setItem('vizion', JSON.stringify(store)); } catch (_) {} };
+
+    let EXERCISES = [];
+    let EQUIP_INDEX = {};        // equipment -> [exercises]
+    let EQUIP_LIST = [];         // [{equipment, count}]
+    let mobilenet = null;        // loaded classifier or null
+    let autoTimer = null;
+    let currentEquip = null;
+    let currentBodyFilter = 'all';
+
+    /* Map coarse MobileNet / ImageNet labels -> dataset equipment.
+       Keys are substrings matched against predicted class names. */
+    const LABEL_MAP = [
+      ['dumbbell', 'dumbbell'],
+      ['barbell', 'barbell'],
+      ['horizontal bar', 'body weight'],
+      ['parallel bars', 'body weight'],
+      ['balance beam', 'body weight'],
+      ['punching bag', 'body weight'],
+      ['maraca', 'dumbbell'],
+      ['ski', 'skierg machine'],
+      ['snorkel', 'body weight'],
+      ['unicycle', 'stationary bike'],
+      ['mountain bike', 'stationary bike'],
+      ['bicycle', 'stationary bike'],
+      ['tandem bicycle', 'stationary bike'],
+      ['treadmill', 'body weight'],
+      ['rugby ball', 'medicine ball'],
+      ['soccer ball', 'stability ball'],
+      ['basketball', 'medicine ball'],
+      ['tennis ball', 'medicine ball'],
+      ['volleyball', 'stability ball'],
+      ['ping-pong ball', 'medicine ball'],
+      ['golf ball', 'medicine ball'],
+      ['medicine ball', 'medicine ball'],
+      ['whistle', 'body weight'],
+      ['bow', 'band'],
+      ['rubber eraser', 'band'],
+      ['bungee', 'resistance band'],
+      ['chain', 'kettlebell'],
+      ['hook', 'kettlebell'],
+      ['gong', 'weighted'],
+      ['dial telephone', 'body weight'],
+    ];
+
+    /* Emoji per equipment for the picker + banners */
+    const EQUIP_EMOJI = {
+      'body weight':'🤸','dumbbell':'🏋️','cable':'🔗','barbell':'🏋️‍♂️','leverage machine':'⚙️',
+      'band':'🎗️','smith machine':'🏗️','kettlebell':'🫧','weighted':'🪨','stability ball':'⚪',
+      'ez barbell':'➰','assisted':'🤝','sled machine':'🛷','medicine ball':'🏐','rope':'🪢',
+      'roller':'🎳','resistance band':'➰','bosu ball':'🔵','olympic barbell':'🏋️','wheel roller':'☸️',
+      'upper body ergometer':'🚣','skierg machine':'⛷️','hammer':'🔨','stationary bike':'🚴','tire':'🛞',
+      'trap bar':'🔷','elliptical machine':'🏃','stepmill machine':'🪜',
+    };
+
+    /* Benefit copy keyed by body part; combined with the specific target. */
+    const BODY_BENEFIT = {
+      'upper arms':  'builds arm size and pressing/pulling strength',
+      'upper legs':  'develops lower-body power, size and everyday strength',
+      'back':        'improves posture, pulling strength and a wider back',
+      'waist':       'strengthens the core for stability and injury prevention',
+      'chest':       'increases pushing strength and upper-body mass',
+      'shoulders':   'builds shoulder width and overhead strength',
+      'lower legs':  'strengthens calves for balance, sprinting and jumping',
+      'lower arms':  'improves grip strength and forearm endurance',
+      'cardio':      'raises heart-rate for conditioning and fat loss',
+      'neck':        'strengthens the neck for stability and support',
+    };
+
+    /* ══════════════════════════════════════════════════
+       1. DOM helpers
+       ══════════════════════════════════════════════════ */
+    const $ = (s) => document.querySelector(s);
+    const cam = $('#cam'), stage = $('#stage'), overlay = $('#overlay');
+    const camDot = $('#camDot'), aiDot = $('#aiDot');
+    const detectBanner = $('#detectBanner'), detectEq = $('#detectEq'), detectConf = $('#detectConf');
+    const hint = $('#hint'), scanBtn = $('#scanBtn');
+    const cap = (s) => (s || '').replace(/\b\w/g, (c) => c.toUpperCase());
+
+    function openSheet(id) {
+      document.querySelectorAll('.sheet').forEach((s) => s.classList.remove('open'));
+      const el = document.getElementById(id);
+      if (el) el.classList.add('open');
+    }
+    function closeSheets() { document.querySelectorAll('.sheet').forEach((s) => s.classList.remove('open')); }
+    document.querySelectorAll('[data-close]').forEach((b) =>
+      b.addEventListener('click', () => document.getElementById(b.dataset.close).classList.remove('open')));
+
+    function showHint(html, autohide) {
+      hint.innerHTML = html; hint.classList.remove('hidden');
+      if (autohide) { clearTimeout(showHint._t); showHint._t = setTimeout(() => hint.classList.add('hidden'), autohide); }
+    }
+
+    /* ══════════════════════════════════════════════════
+       2. Voice (hands-free, for glasses)
+       ══════════════════════════════════════════════════ */
+    const VOICE_LANG = { en:'en-US', es:'es-ES', it:'it-IT', tr:'tr-TR', ru:'ru-RU', zh:'zh-CN' };
+    function speak(text) {
+      if (!store.voice || !('speechSynthesis' in window) || !text) return;
+      try {
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = VOICE_LANG[store.lang] || 'en-US';
+        u.rate = 1.05; // slightly brisk so hands-free coaching feels natural, not sluggish
+        u.pitch = 1;
+        window.speechSynthesis.speak(u);
+      } catch (_) {}
+    }
+    function stopSpeak() { try { window.speechSynthesis.cancel(); } catch (_) {} }
+
+    /* ══════════════════════════════════════════════════
+       3. Data loading + indexing
+       ══════════════════════════════════════════════════ */
+    async function loadData() {
+      const res = await fetch('data/exercises.json', { cache: 'force-cache' });
+      if (!res.ok) throw new Error('data ' + res.status);
+      EXERCISES = await res.json();
+      EQUIP_INDEX = {};
+      EXERCISES.forEach((ex) => {
+        (EQUIP_INDEX[ex.equipment] = EQUIP_INDEX[ex.equipment] || []).push(ex);
+      });
+      EQUIP_LIST = Object.keys(EQUIP_INDEX)
+        .map((e) => ({ equipment: e, count: EQUIP_INDEX[e].length }))
+        .sort((a, b) => b.count - a.count);
+      // Reflect the real dataset size in the intro copy.
+      const countEl = document.getElementById('ovCount');
+      if (countEl) countEl.textContent = EXERCISES.length.toLocaleString();
+    }
+
+    /* Rank exercises: prefer ones with media + spread across body parts. */
+    function rankForEquip(equip) {
+      const list = (EQUIP_INDEX[equip] || []).slice();
+      return list.sort((a, b) => {
+        const am = a.gif_url ? 1 : 0, bm = b.gif_url ? 1 : 0;
+        if (am !== bm) return bm - am;
+        return (a.name || '').localeCompare(b.name || '');
+      });
+    }
+
+    function benefitFor(ex) {
+      const body = BODY_BENEFIT[ex.body_part] || 'builds strength and mobility';
+      const target = ex.target ? cap(ex.target) : 'target muscles';
+      return `Targets ${target} — ${body}.`;
+    }
+
+    /* ══════════════════════════════════════════════════
+       4. Camera
+       ══════════════════════════════════════════════════ */
+    async function startCamera() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Camera API unavailable. Serve this page over HTTPS or localhost.');
+      }
+      const tries = [
+        { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+        { video: { facingMode: 'environment' }, audio: false },
+        { video: true, audio: false },
+      ];
+      let stream, err;
+      for (const c of tries) {
+        try { stream = await navigator.mediaDevices.getUserMedia(c); break; }
+        catch (e) { err = e; }
+      }
+      if (!stream) throw err || new Error('No camera stream');
+      cam.srcObject = stream;
+      await cam.play().catch(() => {});
+      cam.classList.remove('idle');
+      camDot.classList.add('on');
+    }
+
+    /* ══════════════════════════════════════════════════
+       5. Equipment recognition (MobileNet, optional)
+       ══════════════════════════════════════════════════ */
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = src; s.async = true;
+        s.onload = resolve; s.onerror = () => reject(new Error('load ' + src));
+        document.head.appendChild(s);
+      });
+    }
+
+    async function loadModel() {
+      aiDot.classList.add('warn');
+      try {
+        await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
+        await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1/dist/mobilenet.min.js');
+        if (!window.mobilenet || !window.mobilenet.load) throw new Error('mobilenet unavailable');
+        // version 2 + alpha 0.5 = the small/fast MobileNet variant: lower accuracy
+        // than alpha 1.0 but much quicker inference, suited to a wearable/mobile HUD.
+        mobilenet = await window.mobilenet.load({ version: 2, alpha: 0.5 });
+        aiDot.classList.remove('warn'); aiDot.classList.add('on');
+        return true;
+      } catch (e) {
+        mobilenet = null;
+        aiDot.classList.remove('warn'); aiDot.classList.add('err');
+        return false;
+      }
+    }
+
+    function mapLabel(className) {
+      const name = (className || '').toLowerCase();
+      for (const [needle, equip] of LABEL_MAP) {
+        if (name.indexOf(needle) !== -1 && EQUIP_INDEX[equip]) return equip;
+      }
+      return null;
+    }
+
+    async function classifyFrame() {
+      if (!mobilenet || !cam.videoWidth) return null;
+      const canvas = $('#scanCanvas');
+      const size = 224;
+      canvas.width = size; canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      // centre-crop the live frame into a square
+      const vw = cam.videoWidth, vh = cam.videoHeight, s = Math.min(vw, vh);
+      ctx.drawImage(cam, (vw - s) / 2, (vh - s) / 2, s, s, 0, 0, size, size);
+      let preds;
+      try { preds = await mobilenet.classify(canvas, 5); } catch (_) { return null; }
+      // Pick the highest-probability prediction that maps to known equipment,
+      // rather than the first match, for more accurate detection.
+      let best = null;
+      for (const p of preds) {
+        const equip = mapLabel(p.className);
+        if (equip && p.probability >= store.confidence && (!best || p.probability > best.confidence)) {
+          best = { equip, confidence: p.probability, raw: p.className };
+        }
+      }
+      if (best) return best;
+      return { equip: null, confidence: preds[0] ? preds[0].probability : 0, raw: preds[0] && preds[0].className };
+    }
+
+    /* ══════════════════════════════════════════════════
+       6. Scan flow
+       ══════════════════════════════════════════════════ */
+    let scanning = false;
+    async function runScan(manual) {
+      if (scanning) return;
+      scanning = true;
+      stage.classList.add('scanning');
+      if (!mobilenet) {
+        stage.classList.remove('scanning'); scanning = false;
+        showHint('AI model offline — tap <b>Equipment</b> to pick manually.', 4000);
+        openPicker();
+        return;
+      }
+      showHint('Analyzing equipment…');
+      const result = await classifyFrame();
+      stage.classList.remove('scanning');
+      scanning = false;
+
+      if (result && result.equip) {
+        selectEquipment(result.equip, result.confidence);
+      } else if (manual) {
+        showHint('Couldn\'t identify it. Pick your equipment below.', 3500);
+        openPicker();
+      } else {
+        hint.classList.add('hidden');
+      }
+    }
+
+    function selectEquipment(equip, confidence) {
+      currentEquip = equip;
+      currentBodyFilter = 'all';
+      detectBanner.classList.remove('hidden');
+      detectEq.textContent = (EQUIP_EMOJI[equip] || '') + ' ' + cap(equip);
+      detectConf.textContent = confidence != null ? Math.round(confidence * 100) + '%' : '';
+      hint.classList.add('hidden');
+      renderResults(equip);
+      openSheet('resultsSheet');
+      const list = EQUIP_INDEX[equip] || [];
+      speak(`${equip} detected. ${list.length} exercises available. Here are your top suggestions.`);
+    }
+
+    /* ══════════════════════════════════════════════════
+       7. Render: suggestions + body-part filter
+       ══════════════════════════════════════════════════ */
+    function renderResults(equip) {
+      const all = rankForEquip(equip);
+      $('#resultsTitle').textContent = cap(equip);
+      $('#resultsSub').textContent = `${all.length} exercises · powered by Exercises Dataset`;
+
+      // body-part filter chips
+      const parts = ['all', ...Array.from(new Set(all.map((e) => e.body_part))).sort()];
+      const chips = $('#bodyChips'); chips.innerHTML = '';
+      parts.forEach((p) => {
+        const b = document.createElement('button');
+        b.className = 'chip' + (p === currentBodyFilter ? ' on' : '');
+        b.textContent = p === 'all' ? 'All' : p;
+        b.addEventListener('click', () => { currentBodyFilter = p; renderResults(equip); });
+        chips.appendChild(b);
+      });
+
+      const filtered = currentBodyFilter === 'all' ? all : all.filter((e) => e.body_part === currentBodyFilter);
+      const listEl = $('#exList'); listEl.innerHTML = '';
+      if (!filtered.length) { listEl.innerHTML = '<div class="empty">No exercises for this filter.</div>'; return; }
+
+      filtered.slice(0, 40).forEach((ex) => {
+        const card = document.createElement('button');
+        card.className = 'ex-card';
+        const media = ex.gif_url || ex.image || '';
+        card.innerHTML = `
+          <img class="ex-thumb" loading="lazy" alt="${escapeHtml(ex.name)} demonstration" src="${media}"
+               onerror="this.style.visibility='hidden'">
+          <div class="ex-info">
+            <div class="ex-name">${escapeHtml(ex.name)}</div>
+            <div class="ex-meta">${escapeHtml(cap(ex.body_part))} · Target: ${escapeHtml(cap(ex.target || '—'))}</div>
+            <div class="ex-help">${escapeHtml(benefitFor(ex))}</div>
+          </div>`;
+        card.addEventListener('click', () => openDetail(ex));
+        listEl.appendChild(card);
+      });
+    }
+
+    /* ══════════════════════════════════════════════════
+       8. Exercise detail
+       ══════════════════════════════════════════════════ */
+    function instructionSteps(ex) {
+      if (Array.isArray(ex.instruction_steps) && ex.instruction_steps.length) return ex.instruction_steps;
+      const txt = ex.instructions && (ex.instructions[store.lang] || ex.instructions.en);
+      if (!txt) return [];
+      // Split into sentences without lookbehind (broader runtime support),
+      // keeping the terminating punctuation on each sentence and capturing any
+      // trailing text that lacks final punctuation.
+      const sentences = txt.match(/[^.!?]+[.!?]+/g) || [];
+      const consumed = sentences.join('');
+      const tail = txt.slice(consumed.length).trim();
+      if (tail) sentences.push(tail);
+      const parts = sentences.length ? sentences : [txt];
+      return parts.map((s) => s.trim()).filter(Boolean);
+    }
+
+    function openDetail(ex) {
+      const media = ex.gif_url || ex.image || '';
+      const steps = instructionSteps(ex);
+      const secondary = (ex.secondary_muscles || []).filter(Boolean);
+      const body = $('#detailBody');
+      body.innerHTML = `
+        <div class="detail-hero">
+          <img alt="${escapeHtml(ex.name)} exercise demonstration" src="${media}" onerror="this.style.visibility='hidden'">
+          <div>
+            <div class="detail-name">${escapeHtml(ex.name)}</div>
+            <div class="detail-sub">${escapeHtml(cap(ex.equipment))} · ${escapeHtml(cap(ex.body_part))}</div>
+            <div style="margin-top:8px">
+              <span class="ex-tag">Target: ${escapeHtml(cap(ex.target || '—'))}</span>
+              <span class="ex-tag">${escapeHtml(cap(ex.category || ex.body_part))}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="detail-block">
+          <div class="detail-h">How it helps</div>
+          <div class="detail-p">${escapeHtml(benefitFor(ex))} ${
+            secondary.length ? 'Also engages ' + escapeHtml(secondary.map(cap).join(', ')) + '.' : ''
+          }</div>
+        </div>
+
+        ${secondary.length ? `
+        <div class="detail-block">
+          <div class="detail-h">Muscles worked</div>
+          <div class="muscle-tags">
+            <span class="ex-tag" style="color:var(--hud);border-color:var(--hud)">${escapeHtml(cap(ex.target || 'target'))}</span>
+            ${secondary.map((m) => `<span class="ex-tag">${escapeHtml(cap(m))}</span>`).join('')}
+          </div>
+        </div>` : ''}
+
+        <div class="detail-block">
+          <div class="detail-h">How to perform · ${escapeHtml(LANGS[store.lang] || 'English')}</div>
+          <div class="steps">
+            ${steps.length
+              ? steps.map((s, i) => `<div class="step"><span class="num">${i + 1}</span><span>${escapeHtml(s)}</span></div>`).join('')
+              : '<div class="detail-p">No instructions available.</div>'}
+          </div>
+        </div>
+
+        <div class="detail-actions">
+          <button class="btn" id="detailBack">◀ Back</button>
+          <button class="btn filled" id="detailNarrate">🔊 Narrate</button>
+        </div>`;
+
+      openSheet('detailSheet');
+      const narrate = () => speak(
+        `${ex.name}. ${benefitFor(ex)} Instructions: ${steps.join(' ')}`
+      );
+      $('#detailNarrate').addEventListener('click', narrate);
+      $('#detailSpeakBtn').onclick = narrate;
+      $('#detailBack').addEventListener('click', () => { stopSpeak(); openSheet('resultsSheet'); });
+    }
+
+    /* ══════════════════════════════════════════════════
+       9. Equipment picker
+       ══════════════════════════════════════════════════ */
+    function openPicker() {
+      const grid = $('#eqGrid'); grid.innerHTML = '';
+      EQUIP_LIST.forEach(({ equipment, count }) => {
+        const b = document.createElement('button');
+        b.className = 'eq-item' + (equipment === currentEquip ? ' on' : '');
+        b.innerHTML = `
+          <span class="eq-emoji">${EQUIP_EMOJI[equipment] || '🏋️'}</span>
+          <span><span class="n">${escapeHtml(cap(equipment))}</span><br><span class="c">${count} exercises</span></span>`;
+        b.addEventListener('click', () => { closeSheets(); selectEquipment(equipment, null); });
+        grid.appendChild(b);
+      });
+      openSheet('pickerSheet');
+    }
+
+    /* ══════════════════════════════════════════════════
+       10. Settings
+       ══════════════════════════════════════════════════ */
+    function renderSettings() {
+      const body = $('#settingsBody');
+      body.innerHTML = `
+        <div class="set-row">
+          <div class="sr-main">
+            <div class="sr-name">Instruction language</div>
+            <div class="sr-desc">Used for on-screen steps &amp; voice</div>
+          </div>
+          <select id="setLang">
+            ${Object.entries(LANGS).map(([k, v]) => `<option value="${k}" ${k === store.lang ? 'selected' : ''}>${v}</option>`).join('')}
+          </select>
+        </div>
+        <div class="set-row">
+          <div class="sr-main">
+            <div class="sr-name">Voice narration</div>
+            <div class="sr-desc">Hands-free coaching through the glasses speaker</div>
+          </div>
+          <button class="toggle ${store.voice ? 'on' : ''}" id="setVoice" role="switch" aria-checked="${store.voice}"></button>
+        </div>
+        <div class="set-row">
+          <div class="sr-main">
+            <div class="sr-name">Continuous scan</div>
+            <div class="sr-desc">Auto-detect equipment as you look around</div>
+          </div>
+          <button class="toggle ${store.autoScan ? 'on' : ''}" id="setAuto" role="switch" aria-checked="${store.autoScan}"></button>
+        </div>
+        <div class="set-row" style="display:block">
+          <div class="sr-name">Detection sensitivity</div>
+          <div class="sr-desc" style="margin-bottom:10px">Lower = detect more eagerly · higher = more certain</div>
+          <input type="range" id="setConf" min="0.05" max="0.6" step="0.01" value="${store.confidence}">
+        </div>
+        <div class="set-row" style="display:block;border:0">
+          <div class="sr-desc" style="line-height:1.7">
+            <b style="color:var(--hud)">Vizion</b> runs entirely on your device.
+            Recognition uses TensorFlow.js MobileNet; exercise data &amp; media come from the
+            open <b>Exercises Dataset</b> (media © Gym visual).
+          </div>
+        </div>`;
+
+      $('#setLang').addEventListener('change', (e) => { store.lang = e.target.value; saveStore(); });
+      $('#setVoice').addEventListener('click', (e) => {
+        store.voice = !store.voice; saveStore();
+        e.target.classList.toggle('on', store.voice); e.target.setAttribute('aria-checked', store.voice);
+        if (!store.voice) stopSpeak();
+      });
+      $('#setAuto').addEventListener('click', (e) => {
+        store.autoScan = !store.autoScan; saveStore();
+        e.target.classList.toggle('on', store.autoScan); e.target.setAttribute('aria-checked', store.autoScan);
+        setupAutoScan();
+      });
+      $('#setConf').addEventListener('input', (e) => { store.confidence = parseFloat(e.target.value); saveStore(); });
+      openSheet('settingsSheet');
+    }
+
+    /* ══════════════════════════════════════════════════
+       11. Continuous (auto) scan
+       ══════════════════════════════════════════════════ */
+    /* Continuous-scan cadence: long enough to keep model inference and battery
+       use reasonable on a wearable, short enough to feel responsive. */
+    const AUTO_SCAN_INTERVAL_MS = 2600;
+    function setupAutoScan() {
+      clearInterval(autoTimer);
+      if (!store.autoScan || !mobilenet) return;
+      autoTimer = setInterval(async () => {
+        // only auto-detect when no sheet is open (i.e. user is "looking")
+        if (document.querySelector('.sheet.open') || scanning || document.hidden) return;
+        const r = await classifyFrame();
+        if (r && r.equip && r.equip !== currentEquip) {
+          selectEquipment(r.equip, r.confidence);
+        }
+      }, AUTO_SCAN_INTERVAL_MS);
+    }
+
+    /* ══════════════════════════════════════════════════
+       12. Misc
+       ══════════════════════════════════════════════════ */
+    function escapeHtml(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    function tick() {
+      const d = new Date();
+      $('#clock').textContent =
+        String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    }
+    setInterval(tick, 1000); tick();
+
+    /* ══════════════════════════════════════════════════
+       13. Wiring
+       ══════════════════════════════════════════════════ */
+    scanBtn.addEventListener('click', () => runScan(true));
+    $('#pickBtn').addEventListener('click', openPicker);
+    $('#settingsBtn').addEventListener('click', renderSettings);
+    $('#speakAllBtn').addEventListener('click', () => {
+      if (!currentEquip) return;
+      const top = rankForEquip(currentEquip)
+        .filter((e) => currentBodyFilter === 'all' || e.body_part === currentBodyFilter)
+        .slice(0, 3);
+      speak(`Top ${top.length} for ${currentEquip}: ` +
+        top.map((e) => `${e.name}, which ${benefitFor(e).toLowerCase()}`).join(' '));
+    });
+
+    document.addEventListener('visibilitychange', () => { if (document.hidden) stopSpeak(); });
+
+    async function boot() {
+      const ovDesc = $('#ovDesc'), ovNote = $('#ovNote'), startBtn = $('#startBtn');
+      startBtn.disabled = true;
+      startBtn.innerHTML = 'Loading…';
+      // 1. data
+      try { await loadData(); }
+      catch (e) {
+        ovDesc.innerHTML = '<span class="ov-err">Could not load exercise data.</span>';
+        ovNote.textContent = 'Open this file from the repository root over http(s) or localhost so data/exercises.json is reachable.';
+        startBtn.style.display = 'none';
+        return;
+      }
+      // 2. camera
+      try { await startCamera(); }
+      catch (e) {
+        camDot.classList.add('err');
+        ovDesc.innerHTML = '<span class="ov-err">' + escapeHtml(e.message) + '</span>';
+        ovNote.innerHTML = 'You can still explore exercises: tap <b>Choose Equipment</b> after activating.';
+      }
+      // 3. model (best-effort, in background)
+      startBtn.disabled = false;
+      startBtn.innerHTML = 'Enter Display';
+      overlay.classList.remove('hidden');
+      loadModel().then((ok) => {
+        setupAutoScan();
+        if (!ok) showHint('AI recognition offline — use <b>Equipment</b> to browse manually.', 5000);
+      });
+    }
+
+    $('#startBtn').addEventListener('click', async () => {
+      overlay.classList.add('hidden');
+      // start camera on user gesture if not already (autoplay/permission friendly)
+      if (!cam.srcObject) { try { await startCamera(); } catch (_) {} }
+      speak('Display active. Point at your equipment and tap scan.');
+      if (!currentEquip) showHint('Point at your <b>equipment</b> and tap <b>Scan</b>.', 6000);
+    });
+
+    // Overlay button initially triggers boot sequence
+    (async function init() {
+      $('#startBtn').textContent = 'Activate Display';
+      await boot();
+      // rebind: first click already handled by listener above; ensure overlay dismiss works
+    })();
+  })();
+  </script>
+</body>
+</html>
