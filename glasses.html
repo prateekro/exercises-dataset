@@ -462,6 +462,10 @@
        0. Config & state
        ══════════════════════════════════════════════════ */
     const LANGS = { en:'English', es:'Español', it:'Italiano', tr:'Türkçe', ru:'Русский', zh:'中文' };
+    const MIN_CONFIDENCE = .05;
+    const MAX_CONFIDENCE = .6;
+    const INTER_FRAME_DELAY_MS = 80;
+    const SHEET_FOCUSABLE = 'button:not([disabled]), select, input, [tabindex]:not([tabindex="-1"])';
     const store = {
       lang: 'en', voice: true, autoScan: true, confidence: 0.18,
     };
@@ -471,7 +475,9 @@
         if (Object.prototype.hasOwnProperty.call(LANGS, saved.lang)) store.lang = saved.lang;
         if (typeof saved.voice === 'boolean') store.voice = saved.voice;
         if (typeof saved.autoScan === 'boolean') store.autoScan = saved.autoScan;
-        if (Number.isFinite(saved.confidence)) store.confidence = Math.min(.6, Math.max(.05, saved.confidence));
+        if (Number.isFinite(saved.confidence)) {
+          store.confidence = Math.min(MAX_CONFIDENCE, Math.max(MIN_CONFIDENCE, saved.confidence));
+        }
       }
     } catch (_) {}
     const saveStore = () => { try { localStorage.setItem('vizion', JSON.stringify(store)); } catch (_) {} };
@@ -572,7 +578,7 @@
       const el = document.getElementById(id);
       if (el) {
         setSheetOpen(el, true);
-        requestAnimationFrame(() => (el.querySelector('.sheet-close, button, select, input') || el).focus());
+        requestAnimationFrame(() => (el.querySelector('.sheet-close') || el.querySelector(SHEET_FOCUSABLE) || el).focus());
       }
     }
     function closeSheets(restoreFocus = true) {
@@ -587,7 +593,7 @@
       if (e.key === 'Escape' && sheet) {
         closeSheets();
       } else if (e.key === 'Tab' && sheet) {
-        const focusable = Array.from(sheet.querySelectorAll('button:not([disabled]), select, input, [tabindex]:not([tabindex="-1"])'));
+        const focusable = Array.from(sheet.querySelectorAll(SHEET_FOCUSABLE));
         if (!focusable.length) return;
         const first = focusable[0], last = focusable[focusable.length - 1];
         if (e.shiftKey && document.activeElement === first) {
@@ -777,7 +783,9 @@
           if (equip) scores.set(equip, (scores.get(equip) || 0) + p.probability);
           if (!strongestRaw || p.probability > strongestRaw.probability) strongestRaw = p;
         }
-        if (sample + 1 < sampleCount) await new Promise((resolve) => setTimeout(resolve, 80));
+        if (sample + 1 < sampleCount) {
+          await new Promise((resolve) => setTimeout(resolve, INTER_FRAME_DELAY_MS));
+        }
       }
       if (!completed) return null;
       let best = null;
@@ -887,7 +895,7 @@
             <div class="ex-help">${escapeHtml(benefitFor(ex))}</div>
           </div>`;
         const image = card.querySelector('img');
-        image.addEventListener('error', () => { image.style.visibility = 'hidden'; }, { once: true });
+        hideBrokenImage(image);
         card.addEventListener('click', () => openDetail(ex));
         listEl.appendChild(card);
       });
@@ -904,7 +912,8 @@
        8. Exercise detail
        ══════════════════════════════════════════════════ */
     function instructionSteps(ex) {
-      const localizedSteps = ex.instruction_steps && !Array.isArray(ex.instruction_steps)
+      const localizedSteps = ex.instruction_steps && typeof ex.instruction_steps === 'object' &&
+          !Array.isArray(ex.instruction_steps)
         ? (ex.instruction_steps[store.lang] || ex.instruction_steps.en)
         : ex.instruction_steps;
       if (Array.isArray(localizedSteps) && localizedSteps.length) return localizedSteps;
@@ -972,7 +981,7 @@
 
       openSheet('detailSheet');
       const detailImage = body.querySelector('img');
-      detailImage.addEventListener('error', () => { detailImage.style.visibility = 'hidden'; }, { once: true });
+      hideBrokenImage(detailImage);
       const narrate = () => speak(
         `${ex.name}. ${benefitFor(ex)} Instructions: ${steps.join(' ')}`
       );
@@ -1085,7 +1094,8 @@
           if (result && result.equip) {
             if (result.equip === autoCandidate) {
               autoCandidateHits++;
-              autoCandidateConfidence = (autoCandidateConfidence + result.confidence) / 2;
+              autoCandidateConfidence =
+                ((autoCandidateConfidence * (autoCandidateHits - 1)) + result.confidence) / autoCandidateHits;
             } else {
               autoCandidate = result.equip;
               autoCandidateHits = 1;
@@ -1116,7 +1126,11 @@
     }
     function safeMediaUrl(path) {
       const value = String(path || '');
+      if (value.includes('..')) return '';
       return /^(images|videos)\/[A-Za-z0-9._-]+$/.test(value) ? value : '';
+    }
+    function hideBrokenImage(image) {
+      if (image) image.addEventListener('error', () => { image.style.visibility = 'hidden'; }, { once: true });
     }
     function tick() {
       const d = new Date();
