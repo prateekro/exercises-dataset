@@ -105,14 +105,16 @@ A step-by-step guide for integrating the dataset into your own application:
 A production-style, single-file **heads-up-display (HUD) app** — designed for Meta-style smart glasses or any phone/webcam — that turns the camera into an exercise coach:
 
 - **Live camera feed** with a glasses-style HUD overlay (reticle, corner brackets, status bar).
-- **On-device equipment recognition** via TensorFlow.js **MobileNet** (loaded from CDN) — point at a dumbbell, barbell, pull-up bar, etc., tap **Scan**, and it identifies the equipment. Nothing you scan leaves the device.
+- **Experimental on-device equipment recognition** via TensorFlow.js **MobileNet** (model files loaded from jsDelivr) — point at equipment and tap **Scan**. Multi-frame voting and continuous-scan consensus reduce one-frame false positives; camera frames remain on the device.
 - **Assisted picker** — if the camera is unsure (or offline), choose from all 28 equipment types manually.
-- **Exercise suggestions** filtered by the detected equipment, with a body-part filter and a plain-language **"how it helps"** benefit for every exercise (derived from its target muscle and body part).
+- **Diversity-ranked exercise suggestions** filtered by the detected equipment, with a body-part filter, incremental rendering, and a plain-language **"how it helps"** benefit for every exercise (derived from its target muscle and body part).
 - **Exercise detail** — animation GIF, muscles worked, and step-by-step instructions in any of the 6 languages.
 - **Hands-free voice narration** (Web Speech API) so a coach can read out suggestions and instructions — ideal for a glasses form factor.
 - **Continuous scan**, language, voice, and sensitivity **settings** persisted in `localStorage`; graceful degradation when the camera or model is unavailable.
 
 > Runs entirely in the browser against `data/exercises.json` — no backend. Because it needs camera access, serve it over `localhost`/HTTPS rather than opening the file directly.
+>
+> Equipment recognition is a best-effort aid, not a safety check. Confirm the selected equipment and use appropriate form; the exercise guidance is informational and is not medical advice.
 
 ---
 

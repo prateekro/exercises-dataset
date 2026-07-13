@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#04060a" />
   <title>Vizion — Smart-Glasses Exercise Coach</title>
   <style>
@@ -178,8 +178,9 @@
       transform: translateY(102%); transition: transform .32s cubic-bezier(.22,.9,.3,1);
       box-shadow: 0 -12px 40px rgba(0,0,0,.5);
       z-index: 20;
+      visibility: hidden; pointer-events: none;
     }
-    .sheet.open { transform: translateY(0); }
+    .sheet.open { transform: translateY(0); visibility: visible; pointer-events: auto; }
     .sheet-grip { width: 40px; height: 4px; border-radius: 2px; background: var(--hud-dim); margin: 10px auto 4px; }
     .sheet-head {
       display: flex; align-items: center; gap: 10px;
@@ -313,6 +314,16 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     .empty { text-align: center; color: var(--ink-soft); font-size: 13px; padding: 30px 10px; line-height: 1.6; }
+    :focus-visible { outline: 2px solid var(--hud); outline-offset: 3px; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+      }
+    }
 
     @media (min-width: 720px) {
       .eq-grid { grid-template-columns: repeat(3, 1fr); }
@@ -344,14 +355,14 @@
     </div>
 
     <!-- Detection banner -->
-    <div class="detect hidden" id="detectBanner">
+    <div class="detect hidden" id="detectBanner" role="status" aria-live="polite">
       <span class="label">Detected</span>
       <span class="eq" id="detectEq">—</span>
       <span class="conf" id="detectConf"></span>
     </div>
 
     <!-- Contextual hint -->
-    <div class="hint" id="hint">Point at your <b>equipment</b> and tap <b>Scan</b>.</div>
+    <div class="hint" id="hint" role="status" aria-live="polite">Point at your <b>equipment</b> and tap <b>Scan</b>.</div>
 
     <!-- Bottom dock -->
     <div class="dock" id="dock">
@@ -370,7 +381,7 @@
     </div>
 
     <!-- Results sheet -->
-    <section class="sheet" id="resultsSheet" aria-label="Suggested exercises">
+    <section class="sheet" id="resultsSheet" role="dialog" aria-modal="true" aria-label="Suggested exercises" aria-hidden="true" inert>
       <div class="sheet-grip"></div>
       <div class="sheet-head">
         <div>
@@ -390,7 +401,7 @@
     </section>
 
     <!-- Equipment picker sheet -->
-    <section class="sheet" id="pickerSheet" aria-label="Choose equipment">
+    <section class="sheet" id="pickerSheet" role="dialog" aria-modal="true" aria-label="Choose equipment" aria-hidden="true" inert>
       <div class="sheet-grip"></div>
       <div class="sheet-head">
         <div>
@@ -403,7 +414,7 @@
     </section>
 
     <!-- Settings sheet -->
-    <section class="sheet" id="settingsSheet" aria-label="Settings">
+    <section class="sheet" id="settingsSheet" role="dialog" aria-modal="true" aria-label="Settings" aria-hidden="true" inert>
       <div class="sheet-grip"></div>
       <div class="sheet-head">
         <div class="sheet-title">Settings</div>
@@ -413,7 +424,7 @@
     </section>
 
     <!-- Exercise detail sheet -->
-    <section class="sheet" id="detailSheet" aria-label="Exercise detail">
+    <section class="sheet" id="detailSheet" role="dialog" aria-modal="true" aria-label="Exercise detail" aria-hidden="true" inert>
       <div class="sheet-grip"></div>
       <div class="sheet-head">
         <div class="sheet-title">Exercise</div>
@@ -439,7 +450,7 @@
         Activate Display
       </button>
       <div class="ov-note" id="ovNote">
-        Requires camera access. Runs fully on-device — nothing you scan leaves your glasses.
+        Camera starts only after activation. Recognition runs on-device; model files are downloaded from jsDelivr.
       </div>
     </div>
   </div>
@@ -451,10 +462,25 @@
        0. Config & state
        ══════════════════════════════════════════════════ */
     const LANGS = { en:'English', es:'Español', it:'Italiano', tr:'Türkçe', ru:'Русский', zh:'中文' };
+    const MIN_CONFIDENCE = .05;
+    const MAX_CONFIDENCE = .6;
+    const DEFAULT_CONFIDENCE = .18;
+    const INTER_FRAME_DELAY_MS = 80;
+    const SHEET_FOCUSABLE = 'button:not([disabled]), select, input, [tabindex]:not([tabindex="-1"])';
     const store = {
-      lang: 'en', voice: true, autoScan: true, confidence: 0.18,
+      lang: 'en', voice: true, autoScan: true, confidence: DEFAULT_CONFIDENCE,
     };
-    try { Object.assign(store, JSON.parse(localStorage.getItem('vizion') || '{}')); } catch (_) {}
+    try {
+      const saved = JSON.parse(localStorage.getItem('vizion') || '{}');
+      if (saved && typeof saved === 'object') {
+        if (Object.prototype.hasOwnProperty.call(LANGS, saved.lang)) store.lang = saved.lang;
+        if (typeof saved.voice === 'boolean') store.voice = saved.voice;
+        if (typeof saved.autoScan === 'boolean') store.autoScan = saved.autoScan;
+        if (Number.isFinite(saved.confidence)) {
+          store.confidence = Math.min(MAX_CONFIDENCE, Math.max(MIN_CONFIDENCE, saved.confidence));
+        }
+      }
+    } catch (_) {}
     const saveStore = () => { try { localStorage.setItem('vizion', JSON.stringify(store)); } catch (_) {} };
 
     let EXERCISES = [];
@@ -462,8 +488,15 @@
     let EQUIP_LIST = [];         // [{equipment, count}]
     let mobilenet = null;        // loaded classifier or null
     let autoTimer = null;
+    let cameraStream = null;
+    let inferenceBusy = false;
+    let autoCandidate = null;
+    let autoCandidateHits = 0;
+    let autoCandidateConfidence = 0;
     let currentEquip = null;
     let currentBodyFilter = 'all';
+    let currentDetail = null;
+    let resultLimit = 40;
 
     /* Map coarse MobileNet / ImageNet labels -> dataset equipment.
        Keys are substrings matched against predicted class names. */
@@ -534,14 +567,43 @@
     const hint = $('#hint'), scanBtn = $('#scanBtn');
     const cap = (s) => (s || '').replace(/\b\w/g, (c) => c.toUpperCase());
 
-    function openSheet(id) {
-      document.querySelectorAll('.sheet').forEach((s) => s.classList.remove('open'));
-      const el = document.getElementById(id);
-      if (el) el.classList.add('open');
+    let focusBeforeSheet = null;
+    function setSheetOpen(sheet, open) {
+      sheet.classList.toggle('open', open);
+      sheet.setAttribute('aria-hidden', String(!open));
+      sheet.inert = !open;
     }
-    function closeSheets() { document.querySelectorAll('.sheet').forEach((s) => s.classList.remove('open')); }
+    function openSheet(id) {
+      focusBeforeSheet = document.activeElement;
+      document.querySelectorAll('.sheet').forEach((s) => setSheetOpen(s, false));
+      const el = document.getElementById(id);
+      if (el) {
+        setSheetOpen(el, true);
+        requestAnimationFrame(() => (el.querySelector('.sheet-close') || el.querySelector(SHEET_FOCUSABLE) || el).focus());
+      }
+    }
+    function closeSheets(restoreFocus = true) {
+      document.querySelectorAll('.sheet').forEach((s) => setSheetOpen(s, false));
+      stopSpeak();
+      if (restoreFocus && focusBeforeSheet && typeof focusBeforeSheet.focus === 'function') focusBeforeSheet.focus();
+    }
     document.querySelectorAll('[data-close]').forEach((b) =>
-      b.addEventListener('click', () => document.getElementById(b.dataset.close).classList.remove('open')));
+      b.addEventListener('click', () => closeSheets()));
+    document.addEventListener('keydown', (e) => {
+      const sheet = document.querySelector('.sheet.open');
+      if (e.key === 'Escape' && sheet) {
+        closeSheets();
+      } else if (e.key === 'Tab' && sheet) {
+        const focusable = Array.from(sheet.querySelectorAll(SHEET_FOCUSABLE));
+        if (!focusable.length) return;
+        const first = focusable[0], last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault(); last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault(); first.focus();
+        }
+      }
+    });
 
     function showHint(html, autohide) {
       hint.innerHTML = html; hint.classList.remove('hidden');
@@ -584,14 +646,27 @@
       if (countEl) countEl.textContent = EXERCISES.length.toLocaleString();
     }
 
-    /* Rank exercises: prefer ones with media + spread across body parts. */
+    /* Diversified round-robin ranking avoids filling the first screen with one body part. */
     function rankForEquip(equip) {
       const list = (EQUIP_INDEX[equip] || []).slice();
-      return list.sort((a, b) => {
+      list.sort((a, b) => {
         const am = a.gif_url ? 1 : 0, bm = b.gif_url ? 1 : 0;
         if (am !== bm) return bm - am;
         return (a.name || '').localeCompare(b.name || '');
       });
+      const buckets = new Map();
+      list.forEach((exercise) => {
+        const key = exercise.body_part || 'other';
+        if (!buckets.has(key)) buckets.set(key, []);
+        buckets.get(key).push(exercise);
+      });
+      const ranked = [];
+      while (ranked.length < list.length) {
+        buckets.forEach((bucket) => {
+          if (bucket.length) ranked.push(bucket.shift());
+        });
+      }
+      return ranked;
     }
 
     function benefitFor(ex) {
@@ -604,6 +679,7 @@
        4. Camera
        ══════════════════════════════════════════════════ */
     async function startCamera() {
+      if (cameraStream && cameraStream.getVideoTracks().some((track) => track.readyState === 'live')) return;
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error('Camera API unavailable. Serve this page over HTTPS or localhost.');
       }
@@ -615,13 +691,33 @@
       let stream, err;
       for (const c of tries) {
         try { stream = await navigator.mediaDevices.getUserMedia(c); break; }
-        catch (e) { err = e; }
+        catch (e) {
+          err = e;
+          if (e.name !== 'OverconstrainedError' && e.name !== 'TypeError') break;
+        }
       }
       if (!stream) throw err || new Error('No camera stream');
-      cam.srcObject = stream;
-      await cam.play().catch(() => {});
+      try {
+        cameraStream = stream;
+        cam.srcObject = stream;
+        await cam.play();
+      } catch (e) {
+        stream.getTracks().forEach((track) => track.stop());
+        cameraStream = null;
+        cam.srcObject = null;
+        throw e;
+      }
       cam.classList.remove('idle');
       camDot.classList.add('on');
+      camDot.classList.remove('err');
+    }
+
+    function stopCamera() {
+      if (cameraStream) cameraStream.getTracks().forEach((track) => track.stop());
+      cameraStream = null;
+      cam.srcObject = null;
+      cam.classList.add('idle');
+      camDot.classList.remove('on');
     }
 
     /* ══════════════════════════════════════════════════
@@ -630,8 +726,13 @@
     function loadScript(src) {
       return new Promise((resolve, reject) => {
         const s = document.createElement('script');
-        s.src = src; s.async = true;
-        s.onload = resolve; s.onerror = () => reject(new Error('load ' + src));
+        const timeout = setTimeout(() => {
+          s.remove();
+          reject(new Error(`Timed out loading AI model from ${src}`));
+        }, 20000);
+        s.src = src; s.async = true; s.crossOrigin = 'anonymous'; s.referrerPolicy = 'no-referrer';
+        s.onload = () => { clearTimeout(timeout); resolve(); };
+        s.onerror = () => { clearTimeout(timeout); reject(new Error('load ' + src)); };
         document.head.appendChild(s);
       });
     }
@@ -662,28 +763,43 @@
       return null;
     }
 
-    async function classifyFrame() {
+    async function classifyFrame(sampleCount = 1) {
       if (!mobilenet || !cam.videoWidth) return null;
       const canvas = $('#scanCanvas');
       const size = 224;
       canvas.width = size; canvas.height = size;
       const ctx = canvas.getContext('2d');
-      // centre-crop the live frame into a square
-      const vw = cam.videoWidth, vh = cam.videoHeight, s = Math.min(vw, vh);
-      ctx.drawImage(cam, (vw - s) / 2, (vh - s) / 2, s, s, 0, 0, size, size);
-      let preds;
-      try { preds = await mobilenet.classify(canvas, 5); } catch (_) { return null; }
-      // Pick the highest-probability prediction that maps to known equipment,
-      // rather than the first match, for more accurate detection.
-      let best = null;
-      for (const p of preds) {
-        const equip = mapLabel(p.className);
-        if (equip && p.probability >= store.confidence && (!best || p.probability > best.confidence)) {
-          best = { equip, confidence: p.probability, raw: p.className };
+      const scores = new Map();
+      let strongestRaw = null;
+      let completed = 0;
+      for (let sample = 0; sample < sampleCount; sample++) {
+        // Centre-crop to match MobileNet input while avoiding a full-resolution copy.
+        const vw = cam.videoWidth, vh = cam.videoHeight, side = Math.min(vw, vh);
+        ctx.drawImage(cam, (vw - side) / 2, (vh - side) / 2, side, side, 0, 0, size, size);
+        let preds;
+        try { preds = await mobilenet.classify(canvas, 8); } catch (_) { continue; }
+        completed++;
+        for (const p of preds) {
+          const equip = mapLabel(p.className);
+          if (equip) scores.set(equip, (scores.get(equip) || 0) + p.probability);
+          if (!strongestRaw || p.probability > strongestRaw.probability) strongestRaw = p;
+        }
+        if (sample + 1 < sampleCount) {
+          await new Promise((resolve) => setTimeout(resolve, INTER_FRAME_DELAY_MS));
         }
       }
-      if (best) return best;
-      return { equip: null, confidence: preds[0] ? preds[0].probability : 0, raw: preds[0] && preds[0].className };
+      if (!completed) return null;
+      let best = null;
+      scores.forEach((score, equip) => {
+        const confidence = score / completed;
+        if (!best || confidence > best.confidence) best = { equip, confidence };
+      });
+      if (best && best.confidence >= store.confidence) return best;
+      return {
+        equip: null,
+        confidence: best ? best.confidence : (strongestRaw ? strongestRaw.probability : 0),
+        raw: strongestRaw && strongestRaw.className,
+      };
     }
 
     /* ══════════════════════════════════════════════════
@@ -691,19 +807,33 @@
        ══════════════════════════════════════════════════ */
     let scanning = false;
     async function runScan(manual) {
-      if (scanning) return;
-      scanning = true;
+      if (scanning || inferenceBusy) {
+        if (manual) showHint('Finishing the current scan…', 1500);
+        return;
+      }
+      if (!cam.videoWidth) {
+        showHint('Camera unavailable — choose equipment manually.', 3500);
+        openPicker();
+        return;
+      }
+      scanning = true; inferenceBusy = true;
       stage.classList.add('scanning');
       if (!mobilenet) {
-        stage.classList.remove('scanning'); scanning = false;
+        stage.classList.remove('scanning'); scanning = false; inferenceBusy = false;
         showHint('AI model offline — tap <b>Equipment</b> to pick manually.', 4000);
         openPicker();
         return;
       }
       showHint('Analyzing equipment…');
-      const result = await classifyFrame();
-      stage.classList.remove('scanning');
-      scanning = false;
+      let result;
+      try {
+        result = await classifyFrame(manual ? 3 : 1);
+      } catch (_) {
+        result = null;
+      } finally {
+        stage.classList.remove('scanning');
+        scanning = false; inferenceBusy = false;
+      }
 
       if (result && result.equip) {
         selectEquipment(result.equip, result.confidence);
@@ -718,6 +848,7 @@
     function selectEquipment(equip, confidence) {
       currentEquip = equip;
       currentBodyFilter = 'all';
+      resultLimit = 40;
       detectBanner.classList.remove('hidden');
       detectEq.textContent = (EQUIP_EMOJI[equip] || '') + ' ' + cap(equip);
       detectConf.textContent = confidence != null ? Math.round(confidence * 100) + '%' : '';
@@ -743,7 +874,8 @@
         const b = document.createElement('button');
         b.className = 'chip' + (p === currentBodyFilter ? ' on' : '');
         b.textContent = p === 'all' ? 'All' : p;
-        b.addEventListener('click', () => { currentBodyFilter = p; renderResults(equip); });
+        b.setAttribute('aria-pressed', String(p === currentBodyFilter));
+        b.addEventListener('click', () => { currentBodyFilter = p; resultLimit = 40; renderResults(equip); });
         chips.appendChild(b);
       });
 
@@ -751,28 +883,41 @@
       const listEl = $('#exList'); listEl.innerHTML = '';
       if (!filtered.length) { listEl.innerHTML = '<div class="empty">No exercises for this filter.</div>'; return; }
 
-      filtered.slice(0, 40).forEach((ex) => {
+      filtered.slice(0, resultLimit).forEach((ex) => {
         const card = document.createElement('button');
         card.className = 'ex-card';
-        const media = ex.gif_url || ex.image || '';
+        const media = safeMediaUrl(ex.image || ex.gif_url);
         card.innerHTML = `
-          <img class="ex-thumb" loading="lazy" alt="${escapeHtml(ex.name)} demonstration" src="${media}"
-               onerror="this.style.visibility='hidden'">
+          <img class="ex-thumb" loading="lazy" decoding="async" alt="${escapeHtml(ex.name)} demonstration"
+               ${media ? `src="${escapeHtml(media)}"` : ''}>
           <div class="ex-info">
             <div class="ex-name">${escapeHtml(ex.name)}</div>
             <div class="ex-meta">${escapeHtml(cap(ex.body_part))} · Target: ${escapeHtml(cap(ex.target || '—'))}</div>
             <div class="ex-help">${escapeHtml(benefitFor(ex))}</div>
           </div>`;
+        const image = card.querySelector('img');
+        hideBrokenImage(image);
         card.addEventListener('click', () => openDetail(ex));
         listEl.appendChild(card);
       });
+      if (filtered.length > resultLimit) {
+        const more = document.createElement('button');
+        more.className = 'btn';
+        more.textContent = `Show more (${filtered.length - resultLimit} remaining)`;
+        more.addEventListener('click', () => { resultLimit += 40; renderResults(equip); });
+        listEl.appendChild(more);
+      }
     }
 
     /* ══════════════════════════════════════════════════
        8. Exercise detail
        ══════════════════════════════════════════════════ */
     function instructionSteps(ex) {
-      if (Array.isArray(ex.instruction_steps) && ex.instruction_steps.length) return ex.instruction_steps;
+      const localizedSteps = ex.instruction_steps && typeof ex.instruction_steps === 'object' &&
+          !Array.isArray(ex.instruction_steps)
+        ? (ex.instruction_steps[store.lang] || ex.instruction_steps.en)
+        : ex.instruction_steps;
+      if (Array.isArray(localizedSteps) && localizedSteps.length) return localizedSteps;
       const txt = ex.instructions && (ex.instructions[store.lang] || ex.instructions.en);
       if (!txt) return [];
       // Split into sentences without lookbehind (broader runtime support),
@@ -787,13 +932,14 @@
     }
 
     function openDetail(ex) {
-      const media = ex.gif_url || ex.image || '';
+      currentDetail = ex;
+      const media = safeMediaUrl(ex.gif_url || ex.image);
       const steps = instructionSteps(ex);
       const secondary = (ex.secondary_muscles || []).filter(Boolean);
       const body = $('#detailBody');
       body.innerHTML = `
         <div class="detail-hero">
-          <img alt="${escapeHtml(ex.name)} exercise demonstration" src="${media}" onerror="this.style.visibility='hidden'">
+          <img alt="${escapeHtml(ex.name)} exercise demonstration" ${media ? `src="${escapeHtml(media)}"` : ''}>
           <div>
             <div class="detail-name">${escapeHtml(ex.name)}</div>
             <div class="detail-sub">${escapeHtml(cap(ex.equipment))} · ${escapeHtml(cap(ex.body_part))}</div>
@@ -835,6 +981,8 @@
         </div>`;
 
       openSheet('detailSheet');
+      const detailImage = body.querySelector('img');
+      hideBrokenImage(detailImage);
       const narrate = () => speak(
         `${ex.name}. ${benefitFor(ex)} Instructions: ${steps.join(' ')}`
       );
@@ -854,7 +1002,8 @@
         b.innerHTML = `
           <span class="eq-emoji">${EQUIP_EMOJI[equipment] || '🏋️'}</span>
           <span><span class="n">${escapeHtml(cap(equipment))}</span><br><span class="c">${count} exercises</span></span>`;
-        b.addEventListener('click', () => { closeSheets(); selectEquipment(equipment, null); });
+        b.setAttribute('aria-pressed', String(equipment === currentEquip));
+        b.addEventListener('click', () => { closeSheets(false); selectEquipment(equipment, null); });
         grid.appendChild(b);
       });
       openSheet('pickerSheet');
@@ -880,14 +1029,14 @@
             <div class="sr-name">Voice narration</div>
             <div class="sr-desc">Hands-free coaching through the glasses speaker</div>
           </div>
-          <button class="toggle ${store.voice ? 'on' : ''}" id="setVoice" role="switch" aria-checked="${store.voice}"></button>
+          <button class="toggle ${store.voice ? 'on' : ''}" id="setVoice" role="switch" aria-label="Voice narration" aria-checked="${store.voice}"></button>
         </div>
         <div class="set-row">
           <div class="sr-main">
             <div class="sr-name">Continuous scan</div>
             <div class="sr-desc">Auto-detect equipment as you look around</div>
           </div>
-          <button class="toggle ${store.autoScan ? 'on' : ''}" id="setAuto" role="switch" aria-checked="${store.autoScan}"></button>
+          <button class="toggle ${store.autoScan ? 'on' : ''}" id="setAuto" role="switch" aria-label="Continuous scan" aria-checked="${store.autoScan}"></button>
         </div>
         <div class="set-row" style="display:block">
           <div class="sr-name">Detection sensitivity</div>
@@ -898,11 +1047,15 @@
           <div class="sr-desc" style="line-height:1.7">
             <b style="color:var(--hud)">Vizion</b> runs entirely on your device.
             Recognition uses TensorFlow.js MobileNet; exercise data &amp; media come from the
-            open <b>Exercises Dataset</b> (media © Gym visual).
+            open <b>Exercises Dataset</b> (media © Gym visual). Recognition and exercise guidance
+            are informational only; verify equipment and use safe form.
           </div>
         </div>`;
 
-      $('#setLang').addEventListener('change', (e) => { store.lang = e.target.value; saveStore(); });
+      $('#setLang').addEventListener('change', (e) => {
+        store.lang = e.target.value; saveStore();
+        if (currentDetail && $('#detailSheet').classList.contains('open')) openDetail(currentDetail);
+      });
       $('#setVoice').addEventListener('click', (e) => {
         store.voice = !store.voice; saveStore();
         e.target.classList.toggle('on', store.voice); e.target.setAttribute('aria-checked', store.voice);
@@ -924,16 +1077,45 @@
        use reasonable on a wearable, short enough to feel responsive. */
     const AUTO_SCAN_INTERVAL_MS = 2600;
     function setupAutoScan() {
-      clearInterval(autoTimer);
+      clearTimeout(autoTimer);
       if (!store.autoScan || !mobilenet) return;
-      autoTimer = setInterval(async () => {
-        // only auto-detect when no sheet is open (i.e. user is "looking")
-        if (document.querySelector('.sheet.open') || scanning || document.hidden) return;
-        const r = await classifyFrame();
-        if (r && r.equip && r.equip !== currentEquip) {
-          selectEquipment(r.equip, r.confidence);
+      const scanWhenIdle = async () => {
+        // Recursive scheduling prevents overlapping inference on slower mobile hardware.
+        if (!document.querySelector('.sheet.open') && !scanning && !inferenceBusy &&
+            !document.hidden && cam.videoWidth) {
+          inferenceBusy = true;
+          let result;
+          try {
+            result = await classifyFrame();
+          } catch (_) {
+            result = null;
+          } finally {
+            inferenceBusy = false;
+          }
+          if (result && result.equip) {
+            if (result.equip === autoCandidate) {
+              autoCandidateHits++;
+              autoCandidateConfidence = rollingAverage(
+                autoCandidateConfidence, result.confidence, autoCandidateHits
+              );
+            } else {
+              autoCandidate = result.equip;
+              autoCandidateHits = 1;
+              autoCandidateConfidence = result.confidence;
+            }
+            // Temporal consensus suppresses one-frame false positives.
+            if (autoCandidateHits >= 2 && autoCandidate !== currentEquip) {
+              selectEquipment(autoCandidate, autoCandidateConfidence);
+              autoCandidateHits = 0;
+            }
+          } else {
+            autoCandidate = null;
+            autoCandidateHits = 0;
+          }
         }
-      }, AUTO_SCAN_INTERVAL_MS);
+        autoTimer = setTimeout(scanWhenIdle, AUTO_SCAN_INTERVAL_MS);
+      };
+      autoTimer = setTimeout(scanWhenIdle, AUTO_SCAN_INTERVAL_MS);
     }
 
     /* ══════════════════════════════════════════════════
@@ -943,6 +1125,16 @@
       return String(s == null ? '' : s)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    function safeMediaUrl(path) {
+      const value = String(path || '');
+      return /^(images|videos)\/[A-Za-z0-9_-]+\.(gif|jpe?g|png|webp|mp4|webm)$/i.test(value) ? value : '';
+    }
+    function hideBrokenImage(image) {
+      if (image) image.addEventListener('error', () => { image.style.visibility = 'hidden'; }, { once: true });
+    }
+    function rollingAverage(currentAverage, newValue, count) {
+      return ((currentAverage * (count - 1)) + newValue) / count;
     }
     function tick() {
       const d = new Date();
@@ -966,7 +1158,19 @@
         top.map((e) => `${e.name}, which ${benefitFor(e).toLowerCase()}`).join(' '));
     });
 
-    document.addEventListener('visibilitychange', () => { if (document.hidden) stopSpeak(); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        stopSpeak();
+        clearTimeout(autoTimer);
+      } else {
+        setupAutoScan();
+      }
+    });
+    window.addEventListener('pagehide', () => {
+      clearTimeout(autoTimer);
+      stopSpeak();
+      stopCamera();
+    });
 
     async function boot() {
       const ovDesc = $('#ovDesc'), ovNote = $('#ovNote'), startBtn = $('#startBtn');
@@ -980,16 +1184,9 @@
         startBtn.style.display = 'none';
         return;
       }
-      // 2. camera
-      try { await startCamera(); }
-      catch (e) {
-        camDot.classList.add('err');
-        ovDesc.innerHTML = '<span class="ov-err">' + escapeHtml(e.message) + '</span>';
-        ovNote.innerHTML = 'You can still explore exercises: tap <b>Choose Equipment</b> after activating.';
-      }
-      // 3. model (best-effort, in background)
+      // Camera permission is intentionally deferred until the explicit activation gesture.
       startBtn.disabled = false;
-      startBtn.innerHTML = 'Enter Display';
+      startBtn.innerHTML = 'Activate Display';
       overlay.classList.remove('hidden');
       loadModel().then((ok) => {
         setupAutoScan();
@@ -998,18 +1195,26 @@
     }
 
     $('#startBtn').addEventListener('click', async () => {
+      const startBtn = $('#startBtn');
+      startBtn.disabled = true;
+      startBtn.textContent = 'Starting…';
+      try {
+        await startCamera();
+      } catch (e) {
+        camDot.classList.add('err');
+        showHint('Camera unavailable — use <b>Equipment</b> to browse manually.', 5000);
+      }
       overlay.classList.add('hidden');
-      // start camera on user gesture if not already (autoplay/permission friendly)
-      if (!cam.srcObject) { try { await startCamera(); } catch (_) {} }
+      startBtn.disabled = false;
+      startBtn.textContent = 'Activate Display';
       speak('Display active. Point at your equipment and tap scan.');
-      if (!currentEquip) showHint('Point at your <b>equipment</b> and tap <b>Scan</b>.', 6000);
+      if (!currentEquip && cam.videoWidth) showHint('Point at your <b>equipment</b> and tap <b>Scan</b>.', 6000);
     });
 
     // Overlay button initially triggers boot sequence
     (async function init() {
       $('#startBtn').textContent = 'Activate Display';
       await boot();
-      // rebind: first click already handled by listener above; ensure overlay dismiss works
     })();
   })();
   </script>
