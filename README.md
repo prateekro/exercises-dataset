@@ -33,7 +33,7 @@
 - 1,324 exercises with category, body-part, equipment, target and muscle-group data
 - an animation GIF + 180×180 thumbnail for every exercise (media © [Gym visual](https://gymvisual.com/) — see [License](#-license--use))
 - step-by-step instructions in 6 languages (🇬🇧 English, 🇪🇸 Spanish, 🇮🇹 Italian, 🇹🇷 Turkish, 🇷🇺 Russian, 🇨🇳 Chinese)
-- the interactive browser (`index.html`) and developer setup guide (`setup.html`)
+- the interactive browser (`index.html`), developer setup guide (`setup.html`), and smart-glasses exercise coach (`glasses.html`)
 
 ---
 
