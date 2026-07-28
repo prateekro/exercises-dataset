@@ -710,6 +710,7 @@
     const DEFAULT_CONFIDENCE = .18;
     const INTER_FRAME_DELAY_MS = 80;
     const PAGE_SIZE = 24;                     // cards rendered per batch (keeps the DOM small)
+    const SCROLL_LOOKAHEAD = '320px';         // load the next batch this far before it is visible
     const MAX_SAVED = 300;                    // generous, but bounded so storage never runs away
     const TEXT_SCALES = [
       { value: 1,    label: 'Default' },
@@ -864,6 +865,19 @@
       if (store.motion !== 'reduced') root.removeAttribute('data-motion');
     }
     applyPreferences();
+
+    /* Camera status dot + a label that always describes the current state. */
+    function setCamStatus(state) {
+      camDot.classList.toggle('on', state === 'on');
+      camDot.classList.toggle('err', state === 'error');
+      const camStat = $('#camStat');
+      if (camStat) {
+        camStat.setAttribute('aria-label',
+          state === 'on' ? 'Camera active'
+            : state === 'error' ? 'Camera unavailable — tap to retry'
+            : 'Camera off — tap to retry');
+      }
+    }
 
     /* Short, opt-out haptic pulse — the only feedback available when the HUD
        is worn and the wearer isn't looking at a phone screen. */
@@ -1095,15 +1109,14 @@
         throw e;
       }
       cam.classList.remove('idle');
-      camDot.classList.add('on');
-      camDot.classList.remove('err');
+      setCamStatus('on');
       torchOn = false;
       refreshCameraControls();
     }
 
     function makeCameraError(kind) {
       const e = new Error(kind === 'insecure'
-        ? 'Camera needs a secure context. Open this page over HTTPS or http://localhost.'
+        ? 'Camera needs a secure context. Open this page over HTTPS, http://localhost or http://127.0.0.1.'
         : 'This browser does not expose a camera API.');
       e.name = kind === 'insecure' ? 'InsecureContextError' : 'NotSupportedError';
       return e;
@@ -1122,7 +1135,7 @@
         case 'TrackStartError':
           return 'Another app is using the camera. Close it and tap CAM to retry.';
         case 'InsecureContextError':
-          return 'Camera needs HTTPS or localhost. Browsing still works here.';
+          return 'Camera needs HTTPS or localhost/127.0.0.1. Browsing still works here.';
         default:
           return (e && e.message) || 'Camera unavailable — browsing manually works just as well.';
       }
@@ -1179,7 +1192,7 @@
       cameraStream = null;
       cam.srcObject = null;
       cam.classList.add('idle');
-      camDot.classList.remove('on');
+      setCamStatus('off');
       torchOn = false;
       refreshCameraControls();
     }
@@ -1444,7 +1457,7 @@
       if ('IntersectionObserver' in window) {
         observer = new IntersectionObserver((entries) => {
           if (entries.some((entry) => entry.isIntersecting)) appendBatch();
-        }, { root: container.closest('.sheet-body') || null, rootMargin: '320px' });
+        }, { root: container.closest('.sheet-body') || null, rootMargin: SCROLL_LOOKAHEAD });
         listObservers.set(container, observer);
         observer.observe(sentinel);
       } else {
@@ -1954,7 +1967,8 @@
       const d = new Date();
       $('#clock').textContent =
         String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-      // Re-arm exactly on the next minute instead of waking up every second.
+      // Re-arm on the next minute instead of waking up every second. The 50 ms
+      // cushion absorbs timer drift so we never fire just before the rollover.
       clearTimeout(tick._t);
       tick._t = setTimeout(tick, (60 - d.getSeconds()) * 1000 - d.getMilliseconds() + 50);
     }
@@ -2065,7 +2079,7 @@
         toast('Camera on');
         setupAutoScan();
       } catch (err) {
-        camDot.classList.add('err');
+        setCamStatus('error');
         toast(cameraErrorMessage(err), 4000);
       }
     }
@@ -2126,7 +2140,8 @@
       try { await loadData(); }
       catch (e) {
         ovDesc.innerHTML = '<span class="ov-err">Could not load exercise data.</span>';
-        ovNote.textContent = 'Open this page from the repository root over http(s) or localhost so data/exercises.json is reachable — for example: python3 -m http.server, then http://localhost:8000/glasses.html';
+        ovNote.innerHTML = 'Serve the repository root over http(s) so <b>data/exercises.json</b> is reachable — ' +
+          'for example run <b>python3 -m http.server</b> and open <b>localhost:8000/glasses.html</b>.';
         startBtn.style.display = 'none';
         return;
       }
@@ -2149,7 +2164,7 @@
         await startCamera();
       } catch (e) {
         cameraError = e;
-        camDot.classList.add('err');
+        setCamStatus('error');
       }
       overlay.classList.add('hidden');
       setHudActive(true);

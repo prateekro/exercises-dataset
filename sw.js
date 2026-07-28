@@ -60,7 +60,7 @@ function cacheQuietly(cacheName, request, response, limit) {
   caches.open(cacheName)
     .then((cache) => cache.put(request, copy))
     .then(() => (limit ? trimCache(cacheName, limit) : undefined))
-    .catch(() => (limit ? trimCache(cacheName, limit).catch(() => undefined) : undefined));
+    .catch(() => undefined); // out of quota: keep serving from the network
 }
 
 async function cacheFirst(request, cacheName, limit) {
