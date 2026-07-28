@@ -4,6 +4,19 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#04060a" />
+  <meta name="description" content="Vizion — an open-source smart-glasses exercise coach. Point your camera at gym equipment and get exercises, benefits and step-by-step instructions in six languages, entirely on-device." />
+  <meta name="color-scheme" content="dark" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Vizion" />
+  <meta property="og:title" content="Vizion — Smart-Glasses Exercise Coach" />
+  <meta property="og:description" content="Point your camera at gym equipment and get exercises, benefits and instructions — open source, on-device, offline-capable." />
+  <meta property="og:type" content="website" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2304060a'/%3E%3Cg fill='none' stroke='%2338f5c9' stroke-width='2'%3E%3Ccircle cx='11' cy='17' r='5'/%3E%3Ccircle cx='23' cy='17' r='5'/%3E%3Cpath d='M16 17h2M3 12h5M24 12h5'/%3E%3C/g%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net" />
   <title>Vizion — Smart-Glasses Exercise Coach</title>
   <style>
     /* ── Reset ─────────────────────────────────────── */
@@ -27,6 +40,29 @@
       --radius:         14px;
       --safe-t:         env(safe-area-inset-top, 0px);
       --safe-b:         env(safe-area-inset-bottom, 0px);
+      --text-scale:     1;         /* user-adjustable, see Settings → Text size */
+      --fx-opacity:     1;         /* HUD film-grain/scanline intensity */
+    }
+
+    /* High-contrast theme — larger contrast ratios, no translucency, no grain.
+       Requested from Settings; also honours the OS "more contrast" preference. */
+    html[data-contrast="high"] {
+      --hud:         #7dffe0;
+      --hud-dim:     rgba(125, 255, 224, 0.6);
+      --hud-faint:   rgba(125, 255, 224, 0.2);
+      --ink:         #ffffff;
+      --ink-soft:    #d3ece7;
+      --panel:       #000d12;
+      --panel-solid: #000d12;
+      --line:        rgba(125, 255, 224, 0.7);
+      --fx-opacity:  0;
+    }
+    html[data-contrast="high"] .sheet,
+    html[data-contrast="high"] .detect,
+    html[data-contrast="high"] .hint { backdrop-filter: none; -webkit-backdrop-filter: none; }
+
+    @media (prefers-contrast: more) {
+      html:not([data-contrast="normal"]) { --line: rgba(56, 245, 201, 0.55); --ink-soft: #c8e8e2; }
     }
 
     html, body { height: 100%; overflow: hidden; }
@@ -52,6 +88,7 @@
     /* subtle scan-line / vignette on top of the feed */
     .fx {
       position: absolute; inset: 0; pointer-events: none;
+      opacity: var(--fx-opacity);
       background:
         radial-gradient(120% 120% at 50% 50%, transparent 55%, rgba(0,0,0,.55) 100%),
         repeating-linear-gradient(0deg, rgba(56,245,201,.035) 0 1px, transparent 1px 3px);
@@ -108,10 +145,26 @@
     .brand b { color: var(--ink); font-weight: 800; }
     .top-spacer { flex: 1; }
     .stat { display: flex; align-items: center; gap: 5px; color: var(--ink-soft); }
+    .stat-btn {
+      pointer-events: auto; font: inherit; font-size: 11px; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--ink-soft);
+    }
     .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-soft); }
     .dot.on { background: var(--hud); box-shadow: 0 0 8px var(--hud); }
     .dot.warn { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
     .dot.err  { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+
+    /* Small round camera controls (torch / lens flip) live in the top bar. */
+    .top-ctl {
+      pointer-events: auto;
+      width: 30px; height: 30px; border-radius: 50%;
+      border: 1px solid var(--line); color: var(--ink-soft);
+      display: none; align-items: center; justify-content: center;
+      background: var(--panel);
+    }
+    .top-ctl.show { display: inline-flex; }
+    .top-ctl svg { width: 16px; height: 16px; }
+    .top-ctl.on { color: var(--hud); border-color: var(--hud); box-shadow: 0 0 10px var(--hud-faint); }
 
     /* ── Detection banner ───────────────────────────── */
     .detect {
@@ -143,16 +196,22 @@
 
     /* ── Bottom action dock ─────────────────────────── */
     .dock {
-      position: absolute; left: 0; right: 0; bottom: 0;
-      padding: 12px 16px calc(14px + var(--safe-b));
-      display: flex; align-items: center; justify-content: center; gap: 14px;
-      background: linear-gradient(0deg, rgba(4,6,10,.9), transparent);
+      position: absolute; left: 0; right: 0; bottom: 0; z-index: 30;
+      padding: 12px 10px calc(14px + var(--safe-b));
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      background: linear-gradient(0deg, rgba(4,6,10,.96) 62%, transparent);
     }
     .dock-btn {
       display: flex; flex-direction: column; align-items: center; gap: 4px;
-      color: var(--ink-soft); font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
-      min-width: 56px; transition: color .15s ease;
+      color: var(--ink-soft); font-size: 10px; letter-spacing: .04em; text-transform: uppercase;
+      min-width: 52px; transition: color .15s ease; position: relative;
     }
+    .dock-btn .badge {
+      position: absolute; top: -4px; right: 6px; min-width: 16px; height: 16px; padding: 0 4px;
+      border-radius: 999px; background: var(--hud); color: #04120e;
+      font-size: 9px; font-weight: 800; display: none; align-items: center; justify-content: center;
+    }
+    .dock-btn .badge.show { display: flex; }
     .dock-btn:active { color: var(--hud); }
     .dock-btn svg { width: 24px; height: 24px; }
     .scan-btn {
@@ -192,7 +251,11 @@
       margin-left: auto; width: 30px; height: 30px; border-radius: 8px;
       border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--ink-soft);
     }
-    .sheet-body { overflow-y: auto; padding: 12px 14px calc(20px + var(--safe-b)); -webkit-overflow-scrolling: touch; }
+    /* Bottom padding clears the always-visible dock so the last card is reachable. */
+    .sheet-body {
+      overflow-y: auto; padding: 12px 14px calc(104px + var(--safe-b));
+      -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+    }
 
     /* ── Filter chips ───────────────────────────────── */
     .chips { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 12px; scrollbar-width: none; }
@@ -207,11 +270,17 @@
     /* ── Exercise cards ─────────────────────────────── */
     .ex-list { display: grid; gap: 10px; }
     .ex-card {
-      display: grid; grid-template-columns: 78px 1fr; gap: 12px; align-items: center;
+      display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center;
       background: rgba(56,245,201,.05); border: 1px solid var(--line);
       border-radius: var(--radius); padding: 10px; text-align: left; width: 100%;
     }
+    .ex-open {
+      display: grid; grid-template-columns: 78px 1fr; gap: 12px; align-items: center;
+      text-align: left; min-width: 0; width: 100%;
+    }
+    .ex-open:active { opacity: .85; }
     .ex-card:active { border-color: var(--hud); }
+    .ex-card:focus-within { border-color: var(--hud); }
     .ex-thumb {
       width: 78px; height: 78px; border-radius: 10px; object-fit: cover;
       background: #06121a; border: 1px solid var(--line);
@@ -314,7 +383,79 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     .empty { text-align: center; color: var(--ink-soft); font-size: 13px; padding: 30px 10px; line-height: 1.6; }
+    .empty b { color: var(--hud); }
     :focus-visible { outline: 2px solid var(--hud); outline-offset: 3px; }
+
+    /* ── Search ─────────────────────────────────────── */
+    .search-wrap { display: flex; align-items: center; gap: 8px; padding: 2px 2px 10px; }
+    .search-input {
+      flex: 1; min-width: 0; background: var(--panel-solid); color: var(--ink);
+      border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+      font: inherit; font-size: 14px;
+    }
+    .search-input::placeholder { color: var(--ink-soft); opacity: .8; }
+    .result-count { font-size: 11px; color: var(--ink-soft); padding: 0 2px 8px; letter-spacing: .06em; text-transform: uppercase; }
+
+    /* ── Save (favourite) control ───────────────────── */
+    .save-btn {
+      flex: 0 0 auto; width: 40px; height: 40px; border-radius: 10px;
+      border: 1px solid var(--line); color: var(--ink-soft);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .save-btn svg { width: 20px; height: 20px; }
+    .save-btn.on { color: var(--hud); border-color: var(--hud); background: var(--hud-faint); }
+    .ex-card .save-btn { align-self: center; }
+    .ex-row { display: grid; grid-template-columns: 1fr 40px; gap: 8px; align-items: center; }
+
+    /* ── Toast ──────────────────────────────────────── */
+    .toast {
+      position: absolute; left: 50%; bottom: calc(150px + var(--safe-b)); transform: translateX(-50%);
+      background: var(--panel-solid); border: 1px solid var(--hud); color: var(--ink);
+      border-radius: 10px; padding: 10px 14px; font-size: 12px; z-index: 60;
+      max-width: calc(100% - 32px); text-align: center; box-shadow: 0 8px 30px rgba(0,0,0,.5);
+      opacity: 0; transition: opacity .2s ease; pointer-events: none;
+    }
+    .toast.show { opacity: 1; }
+
+    /* ── Update / offline banner ────────────────────── */
+    .banner {
+      position: absolute; left: 50%; top: calc(12px + var(--safe-t)); transform: translateX(-50%);
+      z-index: 55; display: none; align-items: center; gap: 10px;
+      background: var(--panel-solid); border: 1px solid var(--hud); border-radius: 999px;
+      padding: 8px 10px 8px 14px; font-size: 11px; color: var(--ink); max-width: calc(100% - 24px);
+    }
+    .banner.show { display: flex; }
+    .banner button {
+      border: 1px solid var(--hud); color: var(--hud); border-radius: 999px; padding: 4px 10px;
+      font-size: 11px; text-transform: uppercase; letter-spacing: .06em; font-weight: 700;
+    }
+
+    /* ── Shortcut / help list ───────────────────────── */
+    .kbd-list { display: grid; gap: 10px; }
+    .kbd-row { display: grid; grid-template-columns: 74px 1fr; gap: 12px; align-items: center; font-size: 13px; }
+    kbd {
+      font: inherit; font-size: 11px; border: 1px solid var(--line); border-radius: 6px;
+      padding: 3px 6px; color: var(--hud); text-align: center; display: inline-block; min-width: 26px;
+    }
+
+    /* ── User text-size preference (Settings → Text size) ─ */
+    .sheet-title  { font-size: calc(13px * var(--text-scale)); }
+    .sheet-sub    { font-size: calc(11px * var(--text-scale)); }
+    .chip         { font-size: calc(12px * var(--text-scale)); }
+    .ex-name      { font-size: calc(14px * var(--text-scale)); }
+    .ex-meta,
+    .ex-help      { font-size: calc(11px * var(--text-scale)); }
+    .detail-name  { font-size: calc(18px * var(--text-scale)); }
+    .detail-sub   { font-size: calc(12px * var(--text-scale)); }
+    .detail-p,
+    .step,
+    .kbd-row      { font-size: calc(13px * var(--text-scale)); }
+    .set-row .sr-name { font-size: calc(13px * var(--text-scale)); }
+    .set-row .sr-desc { font-size: calc(11px * var(--text-scale)); }
+    .hint         { font-size: calc(12px * var(--text-scale)); }
+    .eq-item .n   { font-size: calc(13px * var(--text-scale)); }
+    .eq-item .c   { font-size: calc(11px * var(--text-scale)); }
+    .search-input { font-size: calc(14px * var(--text-scale)); }
 
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
@@ -323,6 +464,23 @@
         animation-iteration-count: 1 !important;
         transition-duration: .01ms !important;
       }
+    }
+
+    /* Same reduction, but user-selected from Settings (some people need it
+       without changing an OS-wide setting). */
+    html[data-motion="reduced"] *,
+    html[data-motion="reduced"] *::before,
+    html[data-motion="reduced"] *::after {
+      animation-duration: .01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: .01ms !important;
+    }
+
+    @media (max-width: 359px) {
+      .dock { gap: 2px; padding-left: 6px; padding-right: 6px; }
+      .dock-btn { min-width: 46px; font-size: 9px; }
+      .dock-btn svg { width: 21px; height: 21px; }
+      .scan-btn { width: 64px; height: 64px; }
     }
 
     @media (min-width: 720px) {
@@ -348,10 +506,23 @@
     <!-- Top status bar -->
     <div class="topbar">
       <span class="brand">VIZ<b>ION</b></span>
+      <button class="top-ctl" id="torchBtn" aria-label="Toggle camera light" aria-pressed="false" title="Camera light">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 3h6v4l-2 3v11h-2V10L9 7V3Z"/></svg>
+      </button>
+      <button class="top-ctl" id="flipBtn" aria-label="Switch camera" title="Switch camera">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8a8 8 0 0 1 13-2M20 16a8 8 0 0 1-13 2"/><path d="M17 3v3h-3M7 21v-3h3"/></svg>
+      </button>
       <span class="top-spacer"></span>
-      <span class="stat"><span id="camDot" class="dot"></span>CAM</span>
+      <button class="stat stat-btn" id="camStat" aria-label="Camera status — tap to retry"><span id="camDot" class="dot"></span>CAM</button>
       <span class="stat"><span id="aiDot" class="dot"></span>AI</span>
+      <span class="stat"><span id="netDot" class="dot"></span>NET</span>
       <span class="stat" id="clock">--:--</span>
+    </div>
+
+    <!-- App-update / offline banner -->
+    <div class="banner" id="banner" role="status">
+      <span id="bannerText"></span>
+      <button id="bannerAction" type="button">Reload</button>
     </div>
 
     <!-- Detection banner -->
@@ -366,6 +537,10 @@
 
     <!-- Bottom dock -->
     <div class="dock" id="dock">
+      <button class="dock-btn" id="searchBtn" aria-label="Search all exercises">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/></svg>
+        Search
+      </button>
       <button class="dock-btn" id="pickBtn" aria-label="Choose equipment">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6.5 6.5h11M6.5 17.5h11M4 9v6M20 9v6M8 8v8M16 8v8"/></svg>
         Equipment
@@ -374,6 +549,11 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8V5a1 1 0 0 1 1-1h3M20 8V5a1 1 0 0 0-1-1h-3M4 16v3a1 1 0 0 0 1 1h3M20 16v3a1 1 0 0 1-1 1h-3M3 12h18"/></svg>
         Scan
       </button>
+      <button class="dock-btn" id="savedBtn" aria-label="Saved exercises">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 4h12v16l-6-4-6 4V4Z"/></svg>
+        Saved
+        <span class="badge" id="savedBadge" aria-hidden="true">0</span>
+      </button>
       <button class="dock-btn" id="settingsBtn" aria-label="Settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2l-.3-2.6H9.8l-.3 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12a7 7 0 0 0 .1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2l.3 2.6h4.4l.3-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6A7 7 0 0 0 19 12Z"/></svg>
         Settings
@@ -381,7 +561,7 @@
     </div>
 
     <!-- Results sheet -->
-    <section class="sheet" id="resultsSheet" role="dialog" aria-modal="true" aria-label="Suggested exercises" aria-hidden="true" inert>
+    <section class="sheet" id="resultsSheet" role="region" aria-label="Suggested exercises" aria-hidden="true" inert>
       <div class="sheet-grip"></div>
       <div class="sheet-head">
         <div>
@@ -401,7 +581,7 @@
     </section>
 
     <!-- Equipment picker sheet -->
-    <section class="sheet" id="pickerSheet" role="dialog" aria-modal="true" aria-label="Choose equipment" aria-hidden="true" inert>
+    <section class="sheet" id="pickerSheet" role="region" aria-label="Choose equipment" aria-hidden="true" inert>
       <div class="sheet-grip"></div>
       <div class="sheet-head">
         <div>
@@ -414,7 +594,7 @@
     </section>
 
     <!-- Settings sheet -->
-    <section class="sheet" id="settingsSheet" role="dialog" aria-modal="true" aria-label="Settings" aria-hidden="true" inert>
+    <section class="sheet" id="settingsSheet" role="region" aria-label="Settings" aria-hidden="true" inert>
       <div class="sheet-grip"></div>
       <div class="sheet-head">
         <div class="sheet-title">Settings</div>
@@ -424,7 +604,7 @@
     </section>
 
     <!-- Exercise detail sheet -->
-    <section class="sheet" id="detailSheet" role="dialog" aria-modal="true" aria-label="Exercise detail" aria-hidden="true" inert>
+    <section class="sheet" id="detailSheet" role="region" aria-label="Exercise detail" aria-hidden="true" inert>
       <div class="sheet-grip"></div>
       <div class="sheet-head">
         <div class="sheet-title">Exercise</div>
@@ -435,6 +615,57 @@
         <button class="sheet-close" data-close="detailSheet" aria-label="Close">✕</button>
       </div>
       <div class="sheet-body" id="detailBody"></div>
+    </section>
+
+    <!-- Search sheet -->
+    <section class="sheet" id="searchSheet" role="region" aria-label="Search exercises" aria-hidden="true" inert>
+      <div class="sheet-grip"></div>
+      <div class="sheet-head">
+        <div>
+          <div class="sheet-title">Search</div>
+          <div class="sheet-sub">Every exercise, by name, muscle or gear</div>
+        </div>
+        <button class="sheet-close" data-close="searchSheet" aria-label="Close">✕</button>
+      </div>
+      <div class="sheet-body">
+        <div class="search-wrap">
+          <input class="search-input" id="searchInput" type="search" autocomplete="off" autocorrect="off"
+                 spellcheck="false" enterkeyhint="search" aria-label="Search exercises"
+                 placeholder="e.g. squat, glutes, kettlebell" />
+        </div>
+        <div class="result-count" id="searchCount" role="status" aria-live="polite"></div>
+        <div class="ex-list" id="searchList"></div>
+      </div>
+    </section>
+
+    <!-- Saved sheet -->
+    <section class="sheet" id="savedSheet" role="region" aria-label="Saved exercises" aria-hidden="true" inert>
+      <div class="sheet-grip"></div>
+      <div class="sheet-head">
+        <div>
+          <div class="sheet-title">Saved</div>
+          <div class="sheet-sub" id="savedSub">Your personal list</div>
+        </div>
+        <button class="dock-btn" id="savedSpeakBtn" style="min-width:auto;margin-left:auto" aria-label="Narrate saved list">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 9v6h4l5 4V5L8 9H4Z"/><path d="M16 8a5 5 0 0 1 0 8"/></svg>
+          Narrate
+        </button>
+        <button class="sheet-close" data-close="savedSheet" aria-label="Close">✕</button>
+      </div>
+      <div class="sheet-body"><div class="ex-list" id="savedList"></div></div>
+    </section>
+
+    <!-- Help sheet -->
+    <section class="sheet" id="helpSheet" role="region" aria-label="Help and shortcuts" aria-hidden="true" inert>
+      <div class="sheet-grip"></div>
+      <div class="sheet-head">
+        <div>
+          <div class="sheet-title">How to use Vizion</div>
+          <div class="sheet-sub">Hands-free, keyboard or touch</div>
+        </div>
+        <button class="sheet-close" data-close="helpSheet" aria-label="Close">✕</button>
+      </div>
+      <div class="sheet-body" id="helpBody"></div>
     </section>
 
     <!-- Boot / permission overlay -->
@@ -452,7 +683,19 @@
       <div class="ov-note" id="ovNote">
         Camera starts only after activation. Recognition runs on-device; model files are downloaded from jsDelivr.
       </div>
+      <button class="dock-btn" id="ovHelpBtn" style="margin-top:18px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.2 2.4c-.6.2-.7.6-.7 1.1v.5"/><path d="M12 17h.01"/></svg>
+        How it works
+      </button>
+      <noscript>
+        <div class="ov-note ov-err" style="margin-top:16px">
+          Vizion needs JavaScript. You can still browse the whole dataset without it in
+          <b>index.html</b>, or read <b>data/exercises.json</b> directly.
+        </div>
+      </noscript>
     </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </div>
 
   <script>
@@ -466,26 +709,61 @@
     const MAX_CONFIDENCE = .6;
     const DEFAULT_CONFIDENCE = .18;
     const INTER_FRAME_DELAY_MS = 80;
-    const SHEET_FOCUSABLE = 'button:not([disabled]), select, input, [tabindex]:not([tabindex="-1"])';
+    const PAGE_SIZE = 24;                     // cards rendered per batch (keeps the DOM small)
+    const MAX_SAVED = 300;                    // generous, but bounded so storage never runs away
+    const TEXT_SCALES = [
+      { value: 1,    label: 'Default' },
+      { value: 1.15, label: 'Large' },
+      { value: 1.3,  label: 'Larger' },
+      { value: 1.5,  label: 'Largest' },
+    ];
+    const SHEET_FOCUSABLE =
+      'button:not([disabled]), select, input, [href], [tabindex]:not([tabindex="-1"])';
+    const STORE_KEY = 'vizion';
+    const SAVED_KEY = 'vizion.saved';
+
     const store = {
       lang: 'en', voice: true, autoScan: true, confidence: DEFAULT_CONFIDENCE,
+      voiceRate: 1.05, textScale: 1, contrast: 'auto', motion: 'auto', haptics: true,
     };
     try {
-      const saved = JSON.parse(localStorage.getItem('vizion') || '{}');
+      const saved = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
       if (saved && typeof saved === 'object') {
         if (Object.prototype.hasOwnProperty.call(LANGS, saved.lang)) store.lang = saved.lang;
         if (typeof saved.voice === 'boolean') store.voice = saved.voice;
         if (typeof saved.autoScan === 'boolean') store.autoScan = saved.autoScan;
+        if (typeof saved.haptics === 'boolean') store.haptics = saved.haptics;
         if (Number.isFinite(saved.confidence)) {
           store.confidence = Math.min(MAX_CONFIDENCE, Math.max(MIN_CONFIDENCE, saved.confidence));
         }
+        if (Number.isFinite(saved.voiceRate)) {
+          store.voiceRate = Math.min(1.6, Math.max(.6, saved.voiceRate));
+        }
+        if (TEXT_SCALES.some((s) => s.value === saved.textScale)) store.textScale = saved.textScale;
+        if (saved.contrast === 'high' || saved.contrast === 'normal' || saved.contrast === 'auto') {
+          store.contrast = saved.contrast;
+        }
+        if (saved.motion === 'reduced' || saved.motion === 'auto') store.motion = saved.motion;
       }
     } catch (_) {}
-    const saveStore = () => { try { localStorage.setItem('vizion', JSON.stringify(store)); } catch (_) {} };
+    const saveStore = () => { try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); } catch (_) {} };
+
+    /* Saved (favourite) exercise ids — kept as a Set for O(1) lookups while rendering. */
+    let savedIds = new Set();
+    try {
+      const raw = JSON.parse(localStorage.getItem(SAVED_KEY) || '[]');
+      if (Array.isArray(raw)) savedIds = new Set(raw.filter((id) => typeof id === 'string').slice(0, MAX_SAVED));
+    } catch (_) {}
+    const persistSaved = () => {
+      try { localStorage.setItem(SAVED_KEY, JSON.stringify(Array.from(savedIds))); } catch (_) {}
+    };
 
     let EXERCISES = [];
+    let EX_BY_ID = new Map();    // id -> exercise
+    let SEARCH_INDEX = [];       // [{ ex, haystack }] built once, reused by every query
     let EQUIP_INDEX = {};        // equipment -> [exercises]
     let EQUIP_LIST = [];         // [{equipment, count}]
+    const RANK_CACHE = new Map();// equipment -> diversity-ranked list (computed once)
     let mobilenet = null;        // loaded classifier or null
     let autoTimer = null;
     let cameraStream = null;
@@ -496,7 +774,9 @@
     let currentEquip = null;
     let currentBodyFilter = 'all';
     let currentDetail = null;
-    let resultLimit = 40;
+    let detailOrigin = 'resultsSheet';
+    let facingMode = 'environment';
+    let torchOn = false;
 
     /* Map coarse MobileNet / ImageNet labels -> dataset equipment.
        Keys are substrings matched against predicted class names. */
@@ -565,7 +845,50 @@
     const camDot = $('#camDot'), aiDot = $('#aiDot');
     const detectBanner = $('#detectBanner'), detectEq = $('#detectEq'), detectConf = $('#detectConf');
     const hint = $('#hint'), scanBtn = $('#scanBtn');
+    const netDot = $('#netDot'), toastEl = $('#toast');
     const cap = (s) => (s || '').replace(/\b\w/g, (c) => c.toUpperCase());
+    const sheets = Array.from(document.querySelectorAll('.sheet'));
+    const openSheetEl = () => sheets.find((s) => s.classList.contains('open')) || null;
+
+    /* Apply the user's display preferences to the document root. */
+    function applyPreferences() {
+      const root = document.documentElement;
+      root.style.setProperty('--text-scale', String(store.textScale));
+      root.dataset.contrast = store.contrast === 'auto' ? '' : store.contrast;
+      if (store.contrast === 'auto') root.removeAttribute('data-contrast');
+      root.dataset.motion = store.motion === 'reduced' ? 'reduced' : '';
+      if (store.motion !== 'reduced') root.removeAttribute('data-motion');
+    }
+    applyPreferences();
+
+    /* Short, opt-out haptic pulse — the only feedback available when the HUD
+       is worn and the wearer isn't looking at a phone screen. */
+    function buzz(pattern) {
+      if (!store.haptics || !navigator.vibrate) return;
+      try { navigator.vibrate(pattern); } catch (_) {}
+    }
+
+    function toast(message, ms = 2200) {
+      toastEl.textContent = message;
+      toastEl.classList.add('show');
+      clearTimeout(toast._t);
+      toast._t = setTimeout(() => toastEl.classList.remove('show'), ms);
+    }
+
+    /* Which dock button owns which panel — used to show the current section. */
+    const SHEET_TO_DOCK = {
+      searchSheet: 'searchBtn', pickerSheet: 'pickBtn', savedSheet: 'savedBtn',
+      settingsSheet: 'settingsBtn', helpSheet: 'settingsBtn',
+      resultsSheet: 'pickBtn', detailSheet: 'pickBtn',
+    };
+    function syncDock(openId) {
+      const activeBtn = openId ? SHEET_TO_DOCK[openId] : null;
+      document.querySelectorAll('.dock > .dock-btn').forEach((btn) => {
+        const on = btn.id === activeBtn;
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-expanded', String(on));
+      });
+    }
 
     let focusBeforeSheet = null;
     function setSheetOpen(sheet, open) {
@@ -574,34 +897,39 @@
       sheet.inert = !open;
     }
     function openSheet(id) {
-      focusBeforeSheet = document.activeElement;
-      document.querySelectorAll('.sheet').forEach((s) => setSheetOpen(s, false));
+      // Only remember the pre-sheet focus when coming from the HUD, otherwise
+      // sheet-to-sheet navigation would try to restore focus into a hidden sheet.
+      if (!openSheetEl()) focusBeforeSheet = document.activeElement;
+      sheets.forEach((s) => setSheetOpen(s, false));
       const el = document.getElementById(id);
-      if (el) {
-        setSheetOpen(el, true);
-        requestAnimationFrame(() => (el.querySelector('.sheet-close') || el.querySelector(SHEET_FOCUSABLE) || el).focus());
-      }
+      if (!el) return;
+      setSheetOpen(el, true);
+      syncDock(id);
+      const body = el.querySelector('.sheet-body');
+      if (body) body.scrollTop = 0;
+      requestAnimationFrame(() => {
+        const target = el.querySelector('[data-autofocus]') || el.querySelector('.sheet-close') ||
+          el.querySelector(SHEET_FOCUSABLE) || el;
+        try { target.focus({ preventScroll: true }); } catch (_) { target.focus(); }
+      });
     }
     function closeSheets(restoreFocus = true) {
-      document.querySelectorAll('.sheet').forEach((s) => setSheetOpen(s, false));
+      if (!openSheetEl()) return;
+      sheets.forEach((s) => setSheetOpen(s, false));
+      syncDock(null);
       stopSpeak();
-      if (restoreFocus && focusBeforeSheet && typeof focusBeforeSheet.focus === 'function') focusBeforeSheet.focus();
+      if (restoreFocus && focusBeforeSheet && document.contains(focusBeforeSheet) &&
+          typeof focusBeforeSheet.focus === 'function') {
+        focusBeforeSheet.focus();
+      }
+      focusBeforeSheet = null;
     }
     document.querySelectorAll('[data-close]').forEach((b) =>
       b.addEventListener('click', () => closeSheets()));
     document.addEventListener('keydown', (e) => {
-      const sheet = document.querySelector('.sheet.open');
-      if (e.key === 'Escape' && sheet) {
+      if (e.key === 'Escape' && openSheetEl()) {
+        e.preventDefault();
         closeSheets();
-      } else if (e.key === 'Tab' && sheet) {
-        const focusable = Array.from(sheet.querySelectorAll(SHEET_FOCUSABLE));
-        if (!focusable.length) return;
-        const first = focusable[0], last = focusable[focusable.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault(); last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault(); first.focus();
-        }
       }
     });
 
@@ -620,7 +948,7 @@
         window.speechSynthesis.cancel();
         const u = new SpeechSynthesisUtterance(text);
         u.lang = VOICE_LANG[store.lang] || 'en-US';
-        u.rate = 1.05; // slightly brisk so hands-free coaching feels natural, not sluggish
+        u.rate = store.voiceRate; // adjustable: brisk for coaching, slower for clarity
         u.pitch = 1;
         window.speechSynthesis.speak(u);
       } catch (_) {}
@@ -631,23 +959,54 @@
        3. Data loading + indexing
        ══════════════════════════════════════════════════ */
     async function loadData() {
-      const res = await fetch('data/exercises.json', { cache: 'force-cache' });
-      if (!res.ok) throw new Error('data ' + res.status);
-      EXERCISES = await res.json();
+      // Abort a hung request rather than leaving the boot screen spinning forever.
+      const controller = typeof AbortController === 'function' ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), 20000) : null;
+      let data;
+      try {
+        const res = await fetch('data/exercises.json', {
+          cache: 'force-cache',
+          signal: controller ? controller.signal : undefined,
+        });
+        if (!res.ok) throw new Error('data ' + res.status);
+        data = await res.json();
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+      if (!Array.isArray(data) || !data.length) throw new Error('exercises.json is empty or malformed');
+      EXERCISES = data;
       EQUIP_INDEX = {};
-      EXERCISES.forEach((ex) => {
+      EX_BY_ID = new Map();
+      SEARCH_INDEX = new Array(EXERCISES.length);
+      RANK_CACHE.clear();
+      EXERCISES.forEach((ex, i) => {
         (EQUIP_INDEX[ex.equipment] = EQUIP_INDEX[ex.equipment] || []).push(ex);
+        if (ex.id != null) EX_BY_ID.set(String(ex.id), ex);
+        // One pre-lowercased haystack per exercise keeps search allocation-free
+        // per keystroke, so typing stays smooth across all 1,300+ records.
+        SEARCH_INDEX[i] = {
+          ex,
+          haystack: [
+            ex.name, ex.body_part, ex.target, ex.equipment, ex.category, ex.muscle_group,
+            (ex.secondary_muscles || []).join(' '),
+          ].join(' ').toLowerCase(),
+        };
       });
       EQUIP_LIST = Object.keys(EQUIP_INDEX)
         .map((e) => ({ equipment: e, count: EQUIP_INDEX[e].length }))
         .sort((a, b) => b.count - a.count);
+      // Drop saved ids that are no longer in the dataset.
+      const pruned = Array.from(savedIds).filter((id) => EX_BY_ID.has(id));
+      if (pruned.length !== savedIds.size) { savedIds = new Set(pruned); persistSaved(); }
       // Reflect the real dataset size in the intro copy.
       const countEl = document.getElementById('ovCount');
       if (countEl) countEl.textContent = EXERCISES.length.toLocaleString();
+      updateSavedBadge();
     }
 
     /* Diversified round-robin ranking avoids filling the first screen with one body part. */
     function rankForEquip(equip) {
+      if (RANK_CACHE.has(equip)) return RANK_CACHE.get(equip);
       const list = (EQUIP_INDEX[equip] || []).slice();
       list.sort((a, b) => {
         const am = a.gif_url ? 1 : 0, bm = b.gif_url ? 1 : 0;
@@ -666,7 +1025,28 @@
           if (bucket.length) ranked.push(bucket.shift());
         });
       }
+      RANK_CACHE.set(equip, ranked);
       return ranked;
+    }
+
+    /* Token-AND search: every whitespace-separated term must appear somewhere in
+       the record, so "kettlebell glutes" narrows instead of widening. */
+    function searchExercises(query, limit = 400) {
+      const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+      if (!terms.length) return [];
+      const exact = [], partial = [];
+      for (let i = 0; i < SEARCH_INDEX.length; i++) {
+        const entry = SEARCH_INDEX[i];
+        let hit = true;
+        for (let t = 0; t < terms.length; t++) {
+          if (entry.haystack.indexOf(terms[t]) === -1) { hit = false; break; }
+        }
+        if (!hit) continue;
+        // Name matches rank above metadata-only matches.
+        ((entry.ex.name || '').toLowerCase().indexOf(terms[0]) !== -1 ? exact : partial).push(entry.ex);
+        if (exact.length + partial.length >= limit) break;
+      }
+      return exact.concat(partial);
     }
 
     function benefitFor(ex) {
@@ -680,12 +1060,15 @@
        ══════════════════════════════════════════════════ */
     async function startCamera() {
       if (cameraStream && cameraStream.getVideoTracks().some((track) => track.readyState === 'live')) return;
+      if (!window.isSecureContext) {
+        throw makeCameraError('insecure');
+      }
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Camera API unavailable. Serve this page over HTTPS or localhost.');
+        throw makeCameraError('unsupported');
       }
       const tries = [
-        { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
-        { video: { facingMode: 'environment' }, audio: false },
+        { video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+        { video: { facingMode: facingMode }, audio: false },
         { video: true, audio: false },
       ];
       let stream, err;
@@ -710,6 +1093,81 @@
       cam.classList.remove('idle');
       camDot.classList.add('on');
       camDot.classList.remove('err');
+      torchOn = false;
+      refreshCameraControls();
+    }
+
+    function makeCameraError(kind) {
+      const e = new Error(kind === 'insecure'
+        ? 'Camera needs a secure context. Open this page over HTTPS or http://localhost.'
+        : 'This browser does not expose a camera API.');
+      e.name = kind === 'insecure' ? 'InsecureContextError' : 'NotSupportedError';
+      return e;
+    }
+
+    /* Human-readable, non-blaming explanation for every failure mode. */
+    function cameraErrorMessage(e) {
+      switch (e && e.name) {
+        case 'NotAllowedError':
+        case 'SecurityError':
+          return 'Camera permission was declined. You can still browse everything manually.';
+        case 'NotFoundError':
+        case 'DevicesNotFoundError':
+          return 'No camera found on this device — browsing manually works just as well.';
+        case 'NotReadableError':
+        case 'TrackStartError':
+          return 'Another app is using the camera. Close it and tap CAM to retry.';
+        case 'InsecureContextError':
+          return 'Camera needs HTTPS or localhost. Browsing still works here.';
+        default:
+          return (e && e.message) || 'Camera unavailable — browsing manually works just as well.';
+      }
+    }
+
+    function videoTrack() {
+      return cameraStream ? cameraStream.getVideoTracks()[0] || null : null;
+    }
+
+    /* Torch (flashlight) is only offered when the active track really supports it. */
+    function refreshCameraControls() {
+      const track = videoTrack();
+      const torchBtn = $('#torchBtn'), flipBtn = $('#flipBtn');
+      let canTorch = false;
+      try {
+        canTorch = !!(track && track.getCapabilities && track.getCapabilities().torch);
+      } catch (_) { canTorch = false; }
+      torchBtn.classList.toggle('show', canTorch);
+      torchBtn.classList.toggle('on', canTorch && torchOn);
+      torchBtn.setAttribute('aria-pressed', String(canTorch && torchOn));
+      flipBtn.classList.toggle('show', !!track);
+    }
+
+    async function toggleTorch() {
+      const track = videoTrack();
+      if (!track || !track.applyConstraints) return;
+      try {
+        await track.applyConstraints({ advanced: [{ torch: !torchOn }] });
+        torchOn = !torchOn;
+        buzz(10);
+      } catch (_) {
+        toast('This camera does not support the light.');
+      }
+      refreshCameraControls();
+    }
+
+    async function flipCamera() {
+      if (!cameraStream) return;
+      const previous = facingMode;
+      facingMode = facingMode === 'environment' ? 'user' : 'environment';
+      stopCamera();
+      try {
+        await startCamera();
+        toast(facingMode === 'user' ? 'Front camera' : 'Rear camera');
+      } catch (e) {
+        facingMode = previous;
+        try { await startCamera(); } catch (_) {}
+        toast(cameraErrorMessage(e));
+      }
     }
 
     function stopCamera() {
@@ -718,6 +1176,8 @@
       cam.srcObject = null;
       cam.classList.add('idle');
       camDot.classList.remove('on');
+      torchOn = false;
+      refreshCameraControls();
     }
 
     /* ══════════════════════════════════════════════════
@@ -738,6 +1198,11 @@
     }
 
     async function loadModel() {
+      if (navigator.onLine === false) {
+        // Fail fast offline: the manual picker and search are fully usable.
+        aiDot.classList.remove('warn'); aiDot.classList.add('err');
+        return false;
+      }
       aiDot.classList.add('warn');
       try {
         await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
@@ -767,8 +1232,8 @@
       if (!mobilenet || !cam.videoWidth) return null;
       const canvas = $('#scanCanvas');
       const size = 224;
-      canvas.width = size; canvas.height = size;
-      const ctx = canvas.getContext('2d');
+      if (canvas.width !== size) { canvas.width = size; canvas.height = size; }
+      const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
       const scores = new Map();
       let strongestRaw = null;
       let completed = 0;
@@ -848,20 +1313,145 @@
     function selectEquipment(equip, confidence) {
       currentEquip = equip;
       currentBodyFilter = 'all';
-      resultLimit = 40;
+      // Reset temporal consensus so a manual choice isn't instantly overridden.
+      autoCandidate = equip;
+      autoCandidateHits = 0;
+      autoCandidateConfidence = 0;
       detectBanner.classList.remove('hidden');
       detectEq.textContent = (EQUIP_EMOJI[equip] || '') + ' ' + cap(equip);
       detectConf.textContent = confidence != null ? Math.round(confidence * 100) + '%' : '';
       hint.classList.add('hidden');
       renderResults(equip);
       openSheet('resultsSheet');
+      buzz(18);
       const list = EQUIP_INDEX[equip] || [];
       speak(`${equip} detected. ${list.length} exercises available. Here are your top suggestions.`);
     }
 
     /* ══════════════════════════════════════════════════
-       7. Render: suggestions + body-part filter
+       7. Shared list rendering (incremental, lazy, reusable)
        ══════════════════════════════════════════════════ */
+    const BOOKMARK_SVG =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">' +
+      '<path d="M6 4h12v16l-6-4-6 4V4Z"/></svg>';
+
+    function updateSavedBadge() {
+      const badge = $('#savedBadge');
+      badge.textContent = savedIds.size > 99 ? '99+' : String(savedIds.size);
+      badge.classList.toggle('show', savedIds.size > 0);
+    }
+
+    function toggleSaved(ex) {
+      const id = String(ex.id);
+      if (savedIds.has(id)) {
+        savedIds.delete(id);
+        toast('Removed from Saved');
+      } else if (savedIds.size >= MAX_SAVED) {
+        toast(`Saved list is full (${MAX_SAVED} exercises).`);
+        return;
+      } else {
+        savedIds.add(id);
+        toast('Added to Saved');
+        buzz(12);
+      }
+      persistSaved();
+      updateSavedBadge();
+      if ($('#savedSheet').classList.contains('open')) renderSaved();
+    }
+
+    function saveButton(ex) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'save-btn';
+      b.innerHTML = BOOKMARK_SVG;
+      const sync = () => {
+        const on = savedIds.has(String(ex.id));
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-pressed', String(on));
+        b.setAttribute('aria-label', `${on ? 'Remove' : 'Save'} ${ex.name}`);
+      };
+      sync();
+      b.addEventListener('click', (e) => { e.stopPropagation(); toggleSaved(ex); sync(); });
+      return b;
+    }
+
+    function exerciseCard(ex, origin) {
+      const card = document.createElement('div');
+      card.className = 'ex-card';
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'ex-open';
+      const media = safeMediaUrl(ex.image || ex.gif_url);
+      // alt="" — the visible name right next to the thumbnail already names it,
+      // so screen readers should not hear the same words twice.
+      open.innerHTML = `
+        <img class="ex-thumb" loading="lazy" decoding="async" width="78" height="78" alt=""
+             ${media ? `src="${escapeHtml(media)}"` : ''}>
+        <div class="ex-info">
+          <div class="ex-name">${escapeHtml(ex.name)}</div>
+          <div class="ex-meta">${escapeHtml(cap(ex.body_part))} · Target: ${escapeHtml(cap(ex.target || '—'))}</div>
+          <div class="ex-help">${escapeHtml(benefitFor(ex))}</div>
+        </div>`;
+      open.setAttribute('aria-label', `${ex.name}. ${benefitFor(ex)} Open details.`);
+      hideBrokenImage(open.querySelector('img'));
+      open.addEventListener('click', () => openDetail(ex, origin));
+      card.appendChild(open);
+      card.appendChild(saveButton(ex));
+      return card;
+    }
+
+    /* Renders long lists a page at a time and streams in more as the sentinel
+       scrolls into view, so a 300-item result set never blocks the main thread. */
+    const listObservers = new WeakMap();
+    function renderList(container, items, origin, emptyHtml) {
+      const previous = listObservers.get(container);
+      if (previous) { previous.disconnect(); listObservers.delete(container); }
+      container.textContent = '';
+      if (!items.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.innerHTML = emptyHtml || 'Nothing here yet.';
+        container.appendChild(empty);
+        return;
+      }
+      let rendered = 0;
+      let observer = null;
+      const sentinel = document.createElement('div');
+      sentinel.setAttribute('aria-hidden', 'true');
+      sentinel.style.height = '1px';
+      const moreBtn = document.createElement('button');
+      moreBtn.type = 'button';
+      moreBtn.className = 'btn';
+      const appendBatch = () => {
+        const frag = document.createDocumentFragment();
+        const end = Math.min(rendered + PAGE_SIZE, items.length);
+        for (; rendered < end; rendered++) frag.appendChild(exerciseCard(items[rendered], origin));
+        container.insertBefore(frag, sentinel);
+        const remaining = items.length - rendered;
+        if (remaining <= 0) {
+          if (observer) observer.disconnect();
+          moreBtn.remove();
+          sentinel.remove();
+        } else {
+          moreBtn.textContent = `Show more (${remaining} remaining)`;
+        }
+      };
+      container.appendChild(sentinel);
+      if ('IntersectionObserver' in window) {
+        observer = new IntersectionObserver((entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) appendBatch();
+        }, { root: container.closest('.sheet-body') || null, rootMargin: '320px' });
+        listObservers.set(container, observer);
+        observer.observe(sentinel);
+      } else {
+        // Progressive enhancement: an explicit button when observers are missing.
+        moreBtn.addEventListener('click', appendBatch);
+        container.insertBefore(moreBtn, sentinel);
+      }
+      appendBatch();
+    }
+
+    /* ── Suggestions for the detected/selected equipment ── */
     function renderResults(equip) {
       const all = rankForEquip(equip);
       $('#resultsTitle').textContent = cap(equip);
@@ -869,57 +1459,88 @@
 
       // body-part filter chips
       const parts = ['all', ...Array.from(new Set(all.map((e) => e.body_part))).sort()];
-      const chips = $('#bodyChips'); chips.innerHTML = '';
+      const chips = $('#bodyChips');
+      chips.textContent = '';
+      chips.setAttribute('role', 'group');
+      chips.setAttribute('aria-label', 'Filter by body part');
       parts.forEach((p) => {
         const b = document.createElement('button');
+        b.type = 'button';
         b.className = 'chip' + (p === currentBodyFilter ? ' on' : '');
         b.textContent = p === 'all' ? 'All' : p;
         b.setAttribute('aria-pressed', String(p === currentBodyFilter));
-        b.addEventListener('click', () => { currentBodyFilter = p; resultLimit = 40; renderResults(equip); });
+        b.addEventListener('click', () => { currentBodyFilter = p; renderResults(equip); });
         chips.appendChild(b);
       });
 
       const filtered = currentBodyFilter === 'all' ? all : all.filter((e) => e.body_part === currentBodyFilter);
-      const listEl = $('#exList'); listEl.innerHTML = '';
-      if (!filtered.length) { listEl.innerHTML = '<div class="empty">No exercises for this filter.</div>'; return; }
+      renderList($('#exList'), filtered, 'resultsSheet',
+        'No exercises match this filter.<br>Tap <b>All</b> to see everything for this equipment.');
+    }
 
-      filtered.slice(0, resultLimit).forEach((ex) => {
-        const card = document.createElement('button');
-        card.className = 'ex-card';
-        const media = safeMediaUrl(ex.image || ex.gif_url);
-        card.innerHTML = `
-          <img class="ex-thumb" loading="lazy" decoding="async" alt="${escapeHtml(ex.name)} demonstration"
-               ${media ? `src="${escapeHtml(media)}"` : ''}>
-          <div class="ex-info">
-            <div class="ex-name">${escapeHtml(ex.name)}</div>
-            <div class="ex-meta">${escapeHtml(cap(ex.body_part))} · Target: ${escapeHtml(cap(ex.target || '—'))}</div>
-            <div class="ex-help">${escapeHtml(benefitFor(ex))}</div>
-          </div>`;
-        const image = card.querySelector('img');
-        hideBrokenImage(image);
-        card.addEventListener('click', () => openDetail(ex));
-        listEl.appendChild(card);
-      });
-      if (filtered.length > resultLimit) {
-        const more = document.createElement('button');
-        more.className = 'btn';
-        more.textContent = `Show more (${filtered.length - resultLimit} remaining)`;
-        more.addEventListener('click', () => { resultLimit += 40; renderResults(equip); });
-        listEl.appendChild(more);
+    /* ── Search across the whole dataset ── */
+    let searchTimer = null;
+    function runSearch(query) {
+      const trimmed = query.trim();
+      const countEl = $('#searchCount');
+      if (!trimmed) {
+        countEl.textContent = `${EXERCISES.length.toLocaleString()} exercises ready`;
+        renderList($('#searchList'), [], 'searchSheet',
+          'Try <b>squat</b>, <b>glutes</b>, <b>kettlebell</b> or <b>no equipment</b>.');
+        return;
       }
+      const results = searchExercises(trimmed);
+      countEl.textContent = results.length
+        ? `${results.length} match${results.length === 1 ? '' : 'es'}`
+        : 'No matches';
+      renderList($('#searchList'), results, 'searchSheet',
+        `Nothing matched “${escapeHtml(trimmed)}”.<br>Check the spelling, or browse by <b>Equipment</b>.`);
+    }
+
+    function openSearch() {
+      openSheet('searchSheet');
+      const input = $('#searchInput');
+      runSearch(input.value);
+      requestAnimationFrame(() => { try { input.focus({ preventScroll: true }); } catch (_) { input.focus(); } });
+    }
+
+    /* ── Saved list ── */
+    function savedExercises() {
+      return Array.from(savedIds).map((id) => EX_BY_ID.get(id)).filter(Boolean);
+    }
+    function renderSaved() {
+      const items = savedExercises();
+      $('#savedSub').textContent = items.length
+        ? `${items.length} exercise${items.length === 1 ? '' : 's'} · stored on this device only`
+        : 'Stored on this device only';
+      renderList($('#savedList'), items, 'savedSheet',
+        'Nothing saved yet.<br>Tap the <b>bookmark</b> on any exercise to keep it here — it stays on this device.');
+    }
+    function openSaved() {
+      renderSaved();
+      openSheet('savedSheet');
     }
 
     /* ══════════════════════════════════════════════════
        8. Exercise detail
        ══════════════════════════════════════════════════ */
     function instructionSteps(ex) {
-      const localizedSteps = ex.instruction_steps && typeof ex.instruction_steps === 'object' &&
-          !Array.isArray(ex.instruction_steps)
-        ? (ex.instruction_steps[store.lang] || ex.instruction_steps.en)
-        : ex.instruction_steps;
-      if (Array.isArray(localizedSteps) && localizedSteps.length) return localizedSteps;
-      const txt = ex.instructions && (ex.instructions[store.lang] || ex.instructions.en);
-      if (!txt) return [];
+      // Report the language actually rendered so the markup can carry a correct
+      // `lang` attribute for screen readers and speech synthesis.
+      const steps = ex.instruction_steps;
+      const isMap = steps && typeof steps === 'object' && !Array.isArray(steps);
+      if (isMap) {
+        if (Array.isArray(steps[store.lang]) && steps[store.lang].length) {
+          return { lang: store.lang, steps: steps[store.lang] };
+        }
+        if (Array.isArray(steps.en) && steps.en.length) return { lang: 'en', steps: steps.en };
+      } else if (Array.isArray(steps) && steps.length) {
+        return { lang: store.lang, steps };
+      }
+      const texts = ex.instructions || {};
+      const lang = texts[store.lang] ? store.lang : (texts.en ? 'en' : null);
+      const txt = lang ? texts[lang] : '';
+      if (!txt) return { lang: store.lang, steps: [] };
       // Split into sentences without lookbehind (broader runtime support),
       // keeping the terminating punctuation on each sentence and capturing any
       // trailing text that lacks final punctuation.
@@ -928,18 +1549,45 @@
       const tail = txt.slice(consumed.length).trim();
       if (tail) sentences.push(tail);
       const parts = sentences.length ? sentences : [txt];
-      return parts.map((s) => s.trim()).filter(Boolean);
+      return { lang, steps: parts.map((s) => s.trim()).filter(Boolean) };
     }
 
-    function openDetail(ex) {
+    /* Same target muscle, different movement — an easy, low-effort way to
+       swap an exercise when a machine is busy or a movement doesn't feel right. */
+    function similarExercises(ex, limit = 6) {
+      if (!ex.target) return [];
+      const seen = new Set([String(ex.id)]);
+      const sameTarget = [];
+      for (const candidate of EXERCISES) {
+        if (sameTarget.length >= limit) break;
+        if (candidate.target !== ex.target || seen.has(String(candidate.id))) continue;
+        seen.add(String(candidate.id));
+        sameTarget.push(candidate);
+      }
+      // Prefer alternatives that use different equipment, so the list is useful
+      // when the original gear is unavailable.
+      return sameTarget.sort((a, b) => {
+        const ad = a.equipment === ex.equipment ? 1 : 0;
+        const bd = b.equipment === ex.equipment ? 1 : 0;
+        return ad - bd;
+      });
+    }
+
+    function openDetail(ex, origin) {
       currentDetail = ex;
+      if (origin) detailOrigin = origin;
       const media = safeMediaUrl(ex.gif_url || ex.image);
-      const steps = instructionSteps(ex);
+      const { lang: stepLang, steps } = instructionSteps(ex);
       const secondary = (ex.secondary_muscles || []).filter(Boolean);
+      const isSaved = savedIds.has(String(ex.id));
       const body = $('#detailBody');
+      const langNote = stepLang !== store.lang
+        ? ` <span class="sheet-sub">(English — no ${escapeHtml(LANGS[store.lang] || '')} text for this one yet)</span>`
+        : '';
       body.innerHTML = `
         <div class="detail-hero">
-          <img alt="${escapeHtml(ex.name)} exercise demonstration" ${media ? `src="${escapeHtml(media)}"` : ''}>
+          <img alt="${escapeHtml(ex.name)} exercise demonstration" width="120" height="120"
+               decoding="async" ${media ? `src="${escapeHtml(media)}"` : ''}>
           <div>
             <div class="detail-name">${escapeHtml(ex.name)}</div>
             <div class="detail-sub">${escapeHtml(cap(ex.equipment))} · ${escapeHtml(cap(ex.body_part))}</div>
@@ -967,28 +1615,57 @@
         </div>` : ''}
 
         <div class="detail-block">
-          <div class="detail-h">How to perform · ${escapeHtml(LANGS[store.lang] || 'English')}</div>
-          <div class="steps">
+          <div class="detail-h">How to perform · ${escapeHtml(LANGS[stepLang] || 'English')}${langNote}</div>
+          <div class="steps" lang="${escapeHtml(stepLang || 'en')}">
             ${steps.length
               ? steps.map((s, i) => `<div class="step"><span class="num">${i + 1}</span><span>${escapeHtml(s)}</span></div>`).join('')
-              : '<div class="detail-p">No instructions available.</div>'}
+              : '<div class="detail-p">No instructions available for this exercise yet.</div>'}
           </div>
         </div>
 
+        <div class="detail-block">
+          <div class="detail-h">Move safely</div>
+          <div class="detail-p">Go at your own pace, start light, stop if anything hurts, and adapt the
+          movement to your body. This guidance is informational, not medical advice.</div>
+        </div>
+
+        <div class="detail-block" id="similarBlock" hidden>
+          <div class="detail-h">Similar exercises</div>
+          <div class="ex-list" id="similarList"></div>
+        </div>
+
         <div class="detail-actions">
-          <button class="btn" id="detailBack">◀ Back</button>
-          <button class="btn filled" id="detailNarrate">🔊 Narrate</button>
+          <button class="btn" id="detailBack" type="button">◀ Back</button>
+          <button class="btn" id="detailSave" type="button" aria-pressed="${isSaved}">${isSaved ? '★ Saved' : '☆ Save'}</button>
+          <button class="btn filled" id="detailNarrate" type="button">🔊 Narrate</button>
         </div>`;
 
       openSheet('detailSheet');
-      const detailImage = body.querySelector('img');
-      hideBrokenImage(detailImage);
-      const narrate = () => speak(
-        `${ex.name}. ${benefitFor(ex)} Instructions: ${steps.join(' ')}`
-      );
+      hideBrokenImage(body.querySelector('img'));
+
+      const similar = similarExercises(ex);
+      if (similar.length) {
+        $('#similarBlock').hidden = false;
+        renderList($('#similarList'), similar, detailOrigin, '');
+      }
+
+      const narrate = () => speak(`${ex.name}. ${benefitFor(ex)} Instructions: ${steps.join(' ')}`);
       $('#detailNarrate').addEventListener('click', narrate);
       $('#detailSpeakBtn').onclick = narrate;
-      $('#detailBack').addEventListener('click', () => { stopSpeak(); openSheet('resultsSheet'); });
+      const saveBtn = $('#detailSave');
+      saveBtn.addEventListener('click', () => {
+        toggleSaved(ex);
+        const on = savedIds.has(String(ex.id));
+        saveBtn.textContent = on ? '★ Saved' : '☆ Save';
+        saveBtn.setAttribute('aria-pressed', String(on));
+      });
+      $('#detailBack').addEventListener('click', () => {
+        stopSpeak();
+        if (detailOrigin === 'savedSheet') openSaved();
+        else if (detailOrigin === 'searchSheet') openSearch();
+        else if (currentEquip) openSheet('resultsSheet');
+        else closeSheets();
+      });
     }
 
     /* ══════════════════════════════════════════════════
@@ -1020,7 +1697,7 @@
             <div class="sr-name">Instruction language</div>
             <div class="sr-desc">Used for on-screen steps &amp; voice</div>
           </div>
-          <select id="setLang">
+          <select id="setLang" aria-label="Instruction language">
             ${Object.entries(LANGS).map(([k, v]) => `<option value="${k}" ${k === store.lang ? 'selected' : ''}>${v}</option>`).join('')}
           </select>
         </div>
@@ -1030,6 +1707,12 @@
             <div class="sr-desc">Hands-free coaching through the glasses speaker</div>
           </div>
           <button class="toggle ${store.voice ? 'on' : ''}" id="setVoice" role="switch" aria-label="Voice narration" aria-checked="${store.voice}"></button>
+        </div>
+        <div class="set-row" style="display:block">
+          <div class="sr-name">Speaking speed</div>
+          <div class="sr-desc" style="margin-bottom:10px">Slower speech is easier to follow mid-set</div>
+          <input type="range" id="setRate" min="0.6" max="1.6" step="0.05" value="${store.voiceRate}"
+                 aria-label="Speaking speed">
         </div>
         <div class="set-row">
           <div class="sr-main">
@@ -1041,7 +1724,59 @@
         <div class="set-row" style="display:block">
           <div class="sr-name">Detection sensitivity</div>
           <div class="sr-desc" style="margin-bottom:10px">Lower = detect more eagerly · higher = more certain</div>
-          <input type="range" id="setConf" min="0.05" max="0.6" step="0.01" value="${store.confidence}">
+          <input type="range" id="setConf" min="0.05" max="0.6" step="0.01" value="${store.confidence}"
+                 aria-label="Detection sensitivity">
+        </div>
+
+        <div class="set-row" style="border-top:1px solid var(--line);border-bottom:0;padding-bottom:4px">
+          <div class="sr-main"><div class="sr-name" style="color:var(--hud)">Comfort &amp; access</div>
+          <div class="sr-desc">Make Vizion fit how you see, hear and move</div></div>
+        </div>
+        <div class="set-row">
+          <div class="sr-main">
+            <div class="sr-name">Text size</div>
+            <div class="sr-desc">Scales all panel text</div>
+          </div>
+          <select id="setScale" aria-label="Text size">
+            ${TEXT_SCALES.map((s) => `<option value="${s.value}" ${s.value === store.textScale ? 'selected' : ''}>${s.label}</option>`).join('')}
+          </select>
+        </div>
+        <div class="set-row">
+          <div class="sr-main">
+            <div class="sr-name">Contrast</div>
+            <div class="sr-desc">High contrast removes blur and film grain</div>
+          </div>
+          <select id="setContrast" aria-label="Contrast">
+            <option value="auto" ${store.contrast === 'auto' ? 'selected' : ''}>Follow system</option>
+            <option value="normal" ${store.contrast === 'normal' ? 'selected' : ''}>Standard</option>
+            <option value="high" ${store.contrast === 'high' ? 'selected' : ''}>High</option>
+          </select>
+        </div>
+        <div class="set-row">
+          <div class="sr-main">
+            <div class="sr-name">Reduce motion</div>
+            <div class="sr-desc">Calms sweeps, pulses and sheet animation</div>
+          </div>
+          <button class="toggle ${store.motion === 'reduced' ? 'on' : ''}" id="setMotion" role="switch" aria-label="Reduce motion" aria-checked="${store.motion === 'reduced'}"></button>
+        </div>
+        <div class="set-row">
+          <div class="sr-main">
+            <div class="sr-name">Haptic feedback</div>
+            <div class="sr-desc">A short buzz when something is detected or saved</div>
+          </div>
+          <button class="toggle ${store.haptics ? 'on' : ''}" id="setHaptics" role="switch" aria-label="Haptic feedback" aria-checked="${store.haptics}"></button>
+        </div>
+
+        <div class="set-row" style="display:block">
+          <div class="sr-name">Your data</div>
+          <div class="sr-desc" style="margin-bottom:10px">
+            ${savedIds.size} saved exercise${savedIds.size === 1 ? '' : 's'} and your preferences live in this
+            browser only — nothing is uploaded, ever.
+          </div>
+          <div class="detail-actions" style="margin-top:0">
+            <button class="btn" id="setHelp" type="button">Help &amp; shortcuts</button>
+            <button class="btn" id="setReset" type="button">Reset app data</button>
+          </div>
         </div>
         <div class="set-row" style="display:block;border:0">
           <div class="sr-desc" style="line-height:1.7">
@@ -1049,6 +1784,7 @@
             Recognition uses TensorFlow.js MobileNet; exercise data &amp; media come from the
             open <b>Exercises Dataset</b> (media © Gym visual). Recognition and exercise guidance
             are informational only; verify equipment and use safe form.
+            <br><br>Open source under the MIT licence — contributions welcome.
           </div>
         </div>`;
 
@@ -1056,18 +1792,92 @@
         store.lang = e.target.value; saveStore();
         if (currentDetail && $('#detailSheet').classList.contains('open')) openDetail(currentDetail);
       });
-      $('#setVoice').addEventListener('click', (e) => {
-        store.voice = !store.voice; saveStore();
-        e.target.classList.toggle('on', store.voice); e.target.setAttribute('aria-checked', store.voice);
-        if (!store.voice) stopSpeak();
-      });
-      $('#setAuto').addEventListener('click', (e) => {
-        store.autoScan = !store.autoScan; saveStore();
-        e.target.classList.toggle('on', store.autoScan); e.target.setAttribute('aria-checked', store.autoScan);
-        setupAutoScan();
+      const bindToggle = (id, read, write) => {
+        $(id).addEventListener('click', (e) => {
+          write(!read());
+          saveStore();
+          e.currentTarget.classList.toggle('on', read());
+          e.currentTarget.setAttribute('aria-checked', String(read()));
+        });
+      };
+      bindToggle('#setVoice', () => store.voice, (v) => { store.voice = v; if (!v) stopSpeak(); });
+      bindToggle('#setAuto', () => store.autoScan, (v) => { store.autoScan = v; setupAutoScan(); });
+      bindToggle('#setHaptics', () => store.haptics, (v) => { store.haptics = v; if (v) buzz(12); });
+      bindToggle('#setMotion', () => store.motion === 'reduced', (v) => {
+        store.motion = v ? 'reduced' : 'auto'; applyPreferences();
       });
       $('#setConf').addEventListener('input', (e) => { store.confidence = parseFloat(e.target.value); saveStore(); });
+      $('#setRate').addEventListener('input', (e) => { store.voiceRate = parseFloat(e.target.value); saveStore(); });
+      $('#setRate').addEventListener('change', () => speak('This is how fast I will speak.'));
+      $('#setScale').addEventListener('change', (e) => {
+        store.textScale = parseFloat(e.target.value); saveStore(); applyPreferences();
+      });
+      $('#setContrast').addEventListener('change', (e) => {
+        store.contrast = e.target.value; saveStore(); applyPreferences();
+      });
+      $('#setHelp').addEventListener('click', openHelp);
+      $('#setReset').addEventListener('click', () => {
+        if (!window.confirm('Clear saved exercises and preferences on this device?')) return;
+        try { localStorage.removeItem(STORE_KEY); localStorage.removeItem(SAVED_KEY); } catch (_) {}
+        savedIds = new Set();
+        persistSaved();
+        updateSavedBadge();
+        toast('App data cleared — reloading…');
+        setTimeout(() => window.location.reload(), 700);
+      });
       openSheet('settingsSheet');
+    }
+
+    /* ══════════════════════════════════════════════════
+       10b. Help & shortcuts
+       ══════════════════════════════════════════════════ */
+    const SHORTCUTS = [
+      ['S', 'Scan what you are looking at'],
+      ['E', 'Choose equipment manually'],
+      ['/', 'Search every exercise'],
+      ['B', 'Open your saved list'],
+      ['G', 'Settings'],
+      ['N', 'Narrate the open panel'],
+      ['?', 'This help panel'],
+      ['Esc', 'Close the open panel'],
+    ];
+    function openHelp() {
+      $('#helpBody').innerHTML = `
+        <div class="detail-block" style="margin-top:4px">
+          <div class="detail-h">Three ways to find an exercise</div>
+          <div class="detail-p">
+            <b>1. Scan</b> — point the camera at equipment and tap the big button; recognition runs
+            on your device and no frame ever leaves it.<br>
+            <b>2. Equipment</b> — pick from every equipment type in the dataset, including
+            <b>body weight</b> if you have no gear at all.<br>
+            <b>3. Search</b> — type a movement, a muscle or a piece of kit.
+          </div>
+        </div>
+        <div class="detail-block">
+          <div class="detail-h">Keyboard &amp; glasses D-pad</div>
+          <div class="kbd-list">
+            ${SHORTCUTS.map(([k, d]) => `<div class="kbd-row"><kbd>${escapeHtml(k)}</kbd><span>${escapeHtml(d)}</span></div>`).join('')}
+          </div>
+        </div>
+        <div class="detail-block">
+          <div class="detail-h">Works offline</div>
+          <div class="detail-p">After the first visit the app, the exercise data and the media you have
+          already viewed are cached, so Vizion keeps working in basements, gyms and planes. Camera
+          recognition still needs the network to load its model; without it, the manual picker and
+          search cover the full dataset just as well.</div>
+        </div>
+        <div class="detail-block">
+          <div class="detail-h">Privacy</div>
+          <div class="detail-p">No account, no analytics, no uploads. Camera frames are processed in
+          memory and discarded; saved exercises and settings stay in this browser.</div>
+        </div>
+        <div class="detail-block">
+          <div class="detail-h">Everyone is welcome</div>
+          <div class="detail-p">Adapt any movement to your body and your day. Larger text, higher
+          contrast, calmer motion, slower narration and haptics are all in Settings — use whatever
+          helps you train comfortably.</div>
+        </div>`;
+      openSheet('helpSheet');
     }
 
     /* ══════════════════════════════════════════════════
@@ -1140,23 +1950,124 @@
       const d = new Date();
       $('#clock').textContent =
         String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+      // Re-arm exactly on the next minute instead of waking up every second.
+      clearTimeout(tick._t);
+      tick._t = setTimeout(tick, (60 - d.getSeconds()) * 1000 - d.getMilliseconds() + 50);
     }
-    setInterval(tick, 1000); tick();
+    tick();
+
+    function updateNetworkStatus() {
+      const online = navigator.onLine !== false;
+      netDot.classList.toggle('on', online);
+      netDot.classList.toggle('warn', !online);
+      if (!online) showBanner('Offline — cached exercises still work.', null);
+      else if ($('#bannerText').textContent.indexOf('Offline') === 0) hideBanner();
+    }
+
+    function showBanner(text, actionLabel, onAction) {
+      const banner = $('#banner'), action = $('#bannerAction');
+      $('#bannerText').textContent = text;
+      if (actionLabel) {
+        action.hidden = false;
+        action.textContent = actionLabel;
+        action.onclick = onAction || null;
+      } else {
+        action.hidden = true;
+        action.onclick = null;
+      }
+      banner.classList.add('show');
+    }
+    function hideBanner() { $('#banner').classList.remove('show'); }
 
     /* ══════════════════════════════════════════════════
        13. Wiring
        ══════════════════════════════════════════════════ */
     scanBtn.addEventListener('click', () => runScan(true));
     $('#pickBtn').addEventListener('click', openPicker);
+    $('#searchBtn').addEventListener('click', openSearch);
+    $('#savedBtn').addEventListener('click', openSaved);
     $('#settingsBtn').addEventListener('click', renderSettings);
-    $('#speakAllBtn').addEventListener('click', () => {
+    $('#ovHelpBtn').addEventListener('click', openHelp);
+    $('#torchBtn').addEventListener('click', toggleTorch);
+    $('#flipBtn').addEventListener('click', flipCamera);
+
+    // Tapping the CAM status is the retry affordance when permission was denied.
+    $('#camStat').addEventListener('click', retryCamera);
+
+    let searchDebounce = null;
+    $('#searchInput').addEventListener('input', (e) => {
+      const value = e.target.value;
+      clearTimeout(searchDebounce);
+      // 120 ms keeps typing fluid while avoiding a full scan on every keystroke.
+      searchDebounce = setTimeout(() => runSearch(value), 120);
+    });
+    $('#searchInput').addEventListener('search', (e) => runSearch(e.target.value));
+
+    function narrateResults() {
       if (!currentEquip) return;
       const top = rankForEquip(currentEquip)
         .filter((e) => currentBodyFilter === 'all' || e.body_part === currentBodyFilter)
         .slice(0, 3);
+      if (!top.length) { speak('No exercises in this filter.'); return; }
       speak(`Top ${top.length} for ${currentEquip}: ` +
         top.map((e) => `${e.name}, which ${benefitFor(e).toLowerCase()}`).join(' '));
+    }
+    $('#speakAllBtn').addEventListener('click', narrateResults);
+
+    function narrateSaved() {
+      const items = savedExercises();
+      if (!items.length) { speak('Your saved list is empty. Tap the bookmark on any exercise to add it.'); return; }
+      speak(`${items.length} saved exercise${items.length === 1 ? '' : 's'}: ` +
+        items.slice(0, 5).map((e) => e.name).join(', '));
+    }
+    $('#savedSpeakBtn').addEventListener('click', narrateSaved);
+
+    /* Keyboard / D-pad shortcuts. Glasses remotes and Bluetooth keyboards send
+       plain key events, so a single key set serves both. */
+    document.addEventListener('keydown', (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = document.activeElement;
+      const typing = el && (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA' ||
+        el.isContentEditable);
+      if (typing) return;
+      if (!overlay.classList.contains('hidden')) {
+        if (e.key === '?') { e.preventDefault(); openHelp(); }
+        return;
+      }
+      switch (e.key.toLowerCase()) {
+        case 's': e.preventDefault(); runScan(true); break;
+        case 'e': e.preventDefault(); openPicker(); break;
+        case '/': e.preventDefault(); openSearch(); break;
+        case 'b': e.preventDefault(); openSaved(); break;
+        case 'g': e.preventDefault(); renderSettings(); break;
+        case 'n': {
+          e.preventDefault();
+          const open = openSheetEl();
+          if (open && open.id === 'savedSheet') narrateSaved();
+          else if (open && open.id === 'detailSheet') $('#detailSpeakBtn').click();
+          else narrateResults();
+          break;
+        }
+        case '?': e.preventDefault(); openHelp(); break;
+        default: break;
+      }
     });
+
+    async function retryCamera() {
+      if (cameraStream) return;
+      showHint('Requesting camera…', 2000);
+      try {
+        await startCamera();
+        toast('Camera on');
+        setupAutoScan();
+      } catch (err) {
+        camDot.classList.add('err');
+        toast(cameraErrorMessage(err), 4000);
+      }
+    }
+
+    window.addEventListener('online', () => { updateNetworkStatus(); if (!mobilenet) loadModel().then(setupAutoScan); });
+    window.addEventListener('offline', updateNetworkStatus);
 
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
@@ -1172,15 +2083,46 @@
       stopCamera();
     });
 
+    // Never let an unexpected failure leave the HUD silently broken.
+    window.addEventListener('error', (e) => {
+      if (e && e.message) toast('Something went wrong. The rest of the app still works.', 3000);
+    });
+    window.addEventListener('unhandledrejection', () => {
+      toast('Something went wrong. The rest of the app still works.', 3000);
+    });
+
+    /* ══════════════════════════════════════════════════
+       14. Offline support (service worker)
+       ══════════════════════════════════════════════════ */
+    function registerServiceWorker() {
+      if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
+      navigator.serviceWorker.register('sw.js').then((reg) => {
+        reg.addEventListener('updatefound', () => {
+          const installing = reg.installing;
+          if (!installing) return;
+          installing.addEventListener('statechange', () => {
+            if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+              showBanner('A new version is ready.', 'Reload', () => window.location.reload());
+            }
+          });
+        });
+      }).catch(() => { /* offline caching is a bonus, never a requirement */ });
+    }
+
+    /* ══════════════════════════════════════════════════
+       15. Boot
+       ══════════════════════════════════════════════════ */
     async function boot() {
       const ovDesc = $('#ovDesc'), ovNote = $('#ovNote'), startBtn = $('#startBtn');
       startBtn.disabled = true;
       startBtn.innerHTML = 'Loading…';
+      updateNetworkStatus();
+      registerServiceWorker();
       // 1. data
       try { await loadData(); }
       catch (e) {
         ovDesc.innerHTML = '<span class="ov-err">Could not load exercise data.</span>';
-        ovNote.textContent = 'Open this file from the repository root over http(s) or localhost so data/exercises.json is reachable.';
+        ovNote.textContent = 'Open this page from the repository root over http(s) or localhost so data/exercises.json is reachable — for example: python3 -m http.server, then http://localhost:8000/glasses.html';
         startBtn.style.display = 'none';
         return;
       }
@@ -1190,7 +2132,7 @@
       overlay.classList.remove('hidden');
       loadModel().then((ok) => {
         setupAutoScan();
-        if (!ok) showHint('AI recognition offline — use <b>Equipment</b> to browse manually.', 5000);
+        if (!ok) showHint('Recognition offline — <b>Search</b> and <b>Equipment</b> cover the full dataset.', 5000);
       });
     }
 
@@ -1198,22 +2140,31 @@
       const startBtn = $('#startBtn');
       startBtn.disabled = true;
       startBtn.textContent = 'Starting…';
+      let cameraError = null;
       try {
         await startCamera();
       } catch (e) {
+        cameraError = e;
         camDot.classList.add('err');
-        showHint('Camera unavailable — use <b>Equipment</b> to browse manually.', 5000);
       }
       overlay.classList.add('hidden');
       startBtn.disabled = false;
       startBtn.textContent = 'Activate Display';
-      speak('Display active. Point at your equipment and tap scan.');
-      if (!currentEquip && cam.videoWidth) showHint('Point at your <b>equipment</b> and tap <b>Scan</b>.', 6000);
+      if (cameraError) {
+        showHint(escapeHtml(cameraErrorMessage(cameraError)) +
+          ' Tap <b>Search</b> or <b>Equipment</b> to keep going.', 7000);
+        speak(cameraErrorMessage(cameraError));
+      } else {
+        speak('Display active. Point at your equipment and tap scan.');
+        if (!currentEquip) showHint('Point at your <b>equipment</b> and tap <b>Scan</b>. Press <b>?</b> for help.', 6000);
+      }
+      setupAutoScan();
     });
 
     // Overlay button initially triggers boot sequence
     (async function init() {
       $('#startBtn').textContent = 'Activate Display';
+      updateSavedBadge();
       await boot();
     })();
   })();

@@ -1,0 +1,24 @@
+{
+  "name": "Vizion — Smart-Glasses Exercise Coach",
+  "short_name": "Vizion",
+  "description": "Point your camera at gym equipment and get exercises, benefits and step-by-step instructions in six languages — on-device and offline-capable.",
+  "start_url": "./glasses.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#04060a",
+  "theme_color": "#04060a",
+  "categories": ["health", "fitness", "utilities"],
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%2304060a'/%3E%3Cg fill='none' stroke='%2338f5c9' stroke-width='24' stroke-linecap='round'%3E%3Ccircle cx='176' cy='280' r='78'/%3E%3Ccircle cx='336' cy='280' r='78'/%3E%3Cpath d='M254 280h4M40 200h58M414 200h58'/%3E%3C/g%3E%3C/svg%3E",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    { "name": "Search exercises", "url": "./glasses.html" },
+    { "name": "Browse the dataset", "url": "./index.html" }
+  ]
+}
