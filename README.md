@@ -102,15 +102,27 @@ A step-by-step guide for integrating the dataset into your own application:
 
 ### `glasses.html` — Smart-Glasses Exercise Coach (camera app)
 
-A production-style, single-file **heads-up-display (HUD) app** — designed for Meta-style smart glasses or any phone/webcam — that turns the camera into an exercise coach:
+A production-grade, single-file **heads-up-display (HUD) app** — designed for Meta-style smart glasses or any phone/webcam — that turns the camera into an exercise coach:
 
-- **Live camera feed** with a glasses-style HUD overlay (reticle, corner brackets, status bar).
-- **Experimental on-device equipment recognition** via TensorFlow.js **MobileNet** (model files loaded from jsDelivr) — point at equipment and tap **Scan**. Multi-frame voting and continuous-scan consensus reduce one-frame false positives; camera frames remain on the device.
-- **Assisted picker** — if the camera is unsure (or offline), choose from all 28 equipment types manually.
-- **Diversity-ranked exercise suggestions** filtered by the detected equipment, with a body-part filter, incremental rendering, and a plain-language **"how it helps"** benefit for every exercise (derived from its target muscle and body part).
-- **Exercise detail** — animation GIF, muscles worked, and step-by-step instructions in any of the 6 languages.
-- **Hands-free voice narration** (Web Speech API) so a coach can read out suggestions and instructions — ideal for a glasses form factor.
-- **Continuous scan**, language, voice, and sensitivity **settings** persisted in `localStorage`; graceful degradation when the camera or model is unavailable.
+**Find an exercise three ways**
+- **Scan** — **on-device equipment recognition** via TensorFlow.js **MobileNet** (model files loaded from jsDelivr): point at equipment and tap Scan. Multi-frame voting and continuous-scan consensus reduce one-frame false positives; camera frames never leave the device.
+- **Equipment picker** — choose from all 28 equipment types manually, including `body weight` when you have no gear at all.
+- **Search** — instant, token-AND search across every exercise by name, muscle, body part or equipment (pre-built index, debounced input).
+
+**Using it**
+- **Diversity-ranked suggestions** with a body-part filter, a plain-language **"how it helps"** benefit for each exercise, and lists that stream in a page at a time as you scroll.
+- **Exercise detail** — animation GIF, muscles worked, step-by-step instructions in any of the 6 languages (with a clear note when a translation isn't available yet), a safety reminder, and **similar exercises** that hit the same target muscle with different equipment.
+- **Saved list** — bookmark exercises into a personal list kept in `localStorage`, with a live count on the dock.
+- **Persistent dock** — Search / Equipment / Scan / Saved / Settings stay reachable while any panel is open, and the dock highlights the section you're in.
+- **Hands-free voice narration** (Web Speech API) with adjustable speaking speed — ideal for a glasses form factor.
+- **Keyboard & D-pad shortcuts** — <kbd>S</kbd> scan, <kbd>E</kbd> equipment, <kbd>/</kbd> search, <kbd>B</kbd> saved, <kbd>G</kbd> settings, <kbd>N</kbd> narrate, <kbd>?</kbd> help, <kbd>Esc</kbd> close.
+- **Camera controls** — torch/flashlight (when the device reports support), front/rear lens switch, and a tappable `CAM` status to retry after a denied or busy camera.
+
+**Production hardening**
+- **Works offline** — a service worker (`sw.js`) caches the app shell, the dataset (stale-while-revalidate) and viewed media (cache-first, bounded to 400 entries), so the app keeps working in basements and gyms. Installable as a PWA via `manifest.webmanifest`.
+- **Accessible and adjustable** — text size, high-contrast theme, reduce-motion, haptics, speaking speed, `aria-live` status regions, labelled controls, visible focus rings, `lang`-tagged instructions, and full keyboard operation.
+- **Graceful degradation everywhere** — human-readable messages for every camera failure mode (denied, missing, in use, insecure context), automatic fallback to manual browsing when the model or network is unavailable, an online/offline indicator, and an "update ready" prompt when a new version is cached.
+- **Private by default** — no accounts, no analytics, no uploads; saved exercises and settings live in your browser and can be cleared from **Settings → Reset app data**.
 
 > Runs entirely in the browser against `data/exercises.json` — no backend. Because it needs camera access, serve it over `localhost`/HTTPS rather than opening the file directly.
 >
@@ -129,6 +141,8 @@ exercises-dataset/
 ├── index.html               # Interactive exercise browser (client-side, no server needed)
 ├── setup.html               # Developer setup guide (DB import + API integration)
 ├── glasses.html             # Smart-glasses HUD coach — camera scans equipment → suggests exercises
+├── manifest.webmanifest     # PWA manifest for the glasses app
+├── sw.js                    # Service worker — offline cache for the glasses app
 ├── NOTICE.md                # Media attribution & license terms
 └── README.md
 ```
@@ -139,7 +153,8 @@ exercises-dataset/
 - **`images/`, `videos/`** — 180×180 thumbnails and animation GIFs (© [Gym visual](https://gymvisual.com/), used with permission).
 - **`index.html`** — Standalone exercise browser. Open directly in any modern browser.
 - **`setup.html`** — Developer guide for DB setup, API integration, and LLM-assisted backend generation.
-- **`glasses.html`** — Standalone smart-glasses HUD app: uses the device camera to recognize gym equipment (TensorFlow.js MobileNet) and suggests exercises with benefits, GIFs, and multilingual instructions. Needs a secure context (localhost/HTTPS) for camera access.
+- **`glasses.html`** — Standalone smart-glasses HUD app: uses the device camera to recognize gym equipment (TensorFlow.js MobileNet) and suggests exercises with benefits, GIFs, and multilingual instructions. Also offers full-dataset search, a saved list, keyboard/hands-free navigation and offline support. Needs a secure context (localhost/HTTPS) for camera access.
+- **`manifest.webmanifest`, `sw.js`** — PWA manifest and service worker that make `glasses.html` installable and usable offline. They are only active when the site is served over http(s); opening files directly still works, just without offline caching.
 - **`LICENSE`, `NOTICE.md`** — MIT (code/data) + the Gym visual media terms.
 
 ---
