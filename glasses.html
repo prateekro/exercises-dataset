@@ -503,8 +503,8 @@
       <div class="scanline"></div>
     </div>
 
-    <!-- Top status bar -->
-    <div class="topbar">
+    <!-- Top status bar (inert until the display is activated) -->
+    <div class="topbar" inert>
       <span class="brand">VIZ<b>ION</b></span>
       <button class="top-ctl" id="torchBtn" aria-label="Toggle camera light" aria-pressed="false" title="Camera light">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 3h6v4l-2 3v11h-2V10L9 7V3Z"/></svg>
@@ -535,8 +535,8 @@
     <!-- Contextual hint -->
     <div class="hint" id="hint" role="status" aria-live="polite">Point at your <b>equipment</b> and tap <b>Scan</b>.</div>
 
-    <!-- Bottom dock -->
-    <div class="dock" id="dock">
+    <!-- Bottom dock (inert until the display is activated) -->
+    <div class="dock" id="dock" inert>
       <button class="dock-btn" id="searchBtn" aria-label="Search all exercises">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/></svg>
         Search
@@ -848,6 +848,10 @@
     const netDot = $('#netDot'), toastEl = $('#toast');
     const cap = (s) => (s || '').replace(/\b\w/g, (c) => c.toUpperCase());
     const sheets = Array.from(document.querySelectorAll('.sheet'));
+    // The boot overlay is opaque, so the HUD behind it must not be tabbable or
+    // announced until the wearer activates the display.
+    const hudLayers = [document.querySelector('.topbar'), document.querySelector('.dock')];
+    const setHudActive = (active) => hudLayers.forEach((el) => { if (el) el.inert = !active; });
     const openSheetEl = () => sheets.find((s) => s.classList.contains('open')) || null;
 
     /* Apply the user's display preferences to the document root. */
@@ -2148,6 +2152,7 @@
         camDot.classList.add('err');
       }
       overlay.classList.add('hidden');
+      setHudActive(true);
       startBtn.disabled = false;
       startBtn.textContent = 'Activate Display';
       if (cameraError) {

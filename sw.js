@@ -52,28 +52,37 @@ async function trimCache(cacheName, limit) {
   await Promise.all(keys.slice(0, keys.length - limit).map((key) => cache.delete(key)));
 }
 
+/* Cache writes are always fire-and-forget: a full storage quota must never turn a
+   successful network response into a failed request. */
+function cacheQuietly(cacheName, request, response, limit) {
+  if (!response || !response.ok) return;
+  const copy = response.clone();
+  caches.open(cacheName)
+    .then((cache) => cache.put(request, copy))
+    .then(() => (limit ? trimCache(cacheName, limit) : undefined))
+    .catch(() => (limit ? trimCache(cacheName, limit).catch(() => undefined) : undefined));
+}
+
 async function cacheFirst(request, cacheName, limit) {
   const cache = await caches.open(cacheName);
   const cached = await cache.match(request);
   if (cached) return cached;
   const response = await fetch(request);
-  if (response && response.ok) {
-    await cache.put(request, response.clone());
-    if (limit) trimCache(cacheName, limit);
-  }
+  cacheQuietly(cacheName, request, response, limit);
   return response;
 }
 
-async function networkFirst(request, cacheName) {
-  const cache = await caches.open(cacheName);
+async function networkFirst(request, cacheName, shellFallback) {
   try {
     const response = await fetch(request);
-    if (response && response.ok) await cache.put(request, response.clone());
+    cacheQuietly(cacheName, request, response);
     return response;
   } catch (err) {
-    const cached = await cache.match(request) || await cache.match('./glasses.html');
+    const cache = await caches.open(cacheName);
+    const cached = await cache.match(request) ||
+      (shellFallback ? await cache.match('./glasses.html') : null);
     if (cached) return cached;
-    throw err;
+    throw err; // a non-document request should fail cleanly, not receive HTML
   }
 }
 
@@ -82,7 +91,7 @@ async function staleWhileRevalidate(request, cacheName) {
   const cached = await cache.match(request);
   const network = fetch(request)
     .then((response) => {
-      if (response && response.ok) cache.put(request, response.clone());
+      cacheQuietly(cacheName, request, response);
       return response;
     })
     .catch(() => cached);
@@ -97,7 +106,7 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return; // let the browser handle CDN traffic
 
   if (request.mode === 'navigate' || (request.headers.get('accept') || '').includes('text/html')) {
-    event.respondWith(networkFirst(request, SHELL_CACHE));
+    event.respondWith(networkFirst(request, SHELL_CACHE, true));
     return;
   }
   if (/\/(images|videos)\//.test(url.pathname)) {
